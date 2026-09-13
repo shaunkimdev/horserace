@@ -1,0 +1,14 @@
+.gradle/
+.gradle-user/
+.android/
+.tools/
+.idea/
+local.properties
+app/build/
+build/
+app/src/main/assets/game/
+*.iml
+releases/*.apk
+!releases/DrawDerby-debug.apk
+releases/*.aab
+outputs/

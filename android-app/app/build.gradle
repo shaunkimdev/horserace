@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace = 'com.drawderby.app'
+    compileSdk = 37
+
+    defaultConfig {
+        applicationId = 'com.drawderby.app'
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 1
+        versionName = '1.0.0'
+        testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    buildFeatures {
+        buildConfig = true
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    buildTypes {
+        release {
+            minifyEnabled = false
+        }
+    }
+    lint {
+        abortOnError = true
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.17.0'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.5.0'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+}
+
+def bundleGame = tasks.register('bundleGame', Exec) {
+    workingDir rootDir
+    commandLine 'node', 'scripts/build-web.mjs'
+    inputs.files(fileTree('../web'), fileTree('../scripts') { include '*.mjs' })
+    inputs.files(fileTree('../../game/app') { include '*.tsx', '*.css' })
+    inputs.files(fileTree('../../game/components') { include '**/*.tsx', '**/*.ts' })
+    inputs.files(fileTree('../../game/lib') { include '*.ts' })
+    inputs.file('../../game/package-lock.json')
+    outputs.dir('src/main/assets/game')
+}
+tasks.named('preBuild').configure { dependsOn bundleGame }

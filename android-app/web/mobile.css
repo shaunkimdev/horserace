@@ -1,0 +1,7 @@
+/* System fonts are bundled with Android, so first launch also works offline. */
+body { font-family: system-ui, -apple-system, "Noto Sans KR", sans-serif; }
+button, input { font-family: inherit; }
+@media (pointer: coarse) {
+  .header-actions button, .borrow-row button, .color-palette button { min-height: 44px; }
+  .mode-tabs button, .button { min-height: 48px; }
+}

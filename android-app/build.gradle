@@ -1,0 +1,8 @@
+plugins {
+    id 'com.android.application' version '9.3.0' apply false
+}
+
+tasks.named('wrapper') {
+    gradleVersion = '9.5.0'
+    distributionType = Wrapper.DistributionType.BIN
+}

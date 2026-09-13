@@ -1,0 +1,13 @@
+<resources>
+    <style name="Base.Theme.DrawDerby" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#53632c</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#d5f444</item>
+        <item name="android:navigationBarColor">#272c21</item>
+        <item name="android:statusBarColor">#d5f444</item>
+    </style>
+    <style name="Theme.DrawDerby" parent="Base.Theme.DrawDerby" />
+    <color name="launcher_background">#d5f444</color>
+</resources>

@@ -1,0 +1,91 @@
+name: Web and Android checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: game/package-lock.json
+      - uses: actions/setup-java@v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            android-app/**/*.gradle
+            android-app/gradle/wrapper/gradle-wrapper.properties
+      - name: Install web dependencies
+        run: npm ci --prefix game
+      - name: Check web game
+        working-directory: game
+        run: |
+          npm test
+          npm run lint
+          npx tsc --noEmit
+          npm run build
+      - name: Prepare Android SDK
+        run: |
+          sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0' 'system-images;android-36;google_apis;x86_64'
+          sudo chmod 666 /dev/kvm
+      - name: Build APK and check Android code
+        working-directory: android-app
+        run: |
+          ./gradlew --no-daemon --console=plain :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+          node scripts/verify-bundle.mjs
+      - name: Start multiplayer server
+        run: |
+          mkdir -p android-app/outputs
+          npm run dev --prefix game -- --hostname 0.0.0.0 --port 3000 > android-app/outputs/game-server.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/ > /dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:3000/ > /dev/null
+          npm run test:server --prefix game
+      - name: Start Android 16 emulator
+        run: |
+          echo no | avdmanager create avd --name DrawDerby_CI --package 'system-images;android-36;google_apis;x86_64' --device pixel_6
+          "$ANDROID_HOME/emulator/emulator" -avd DrawDerby_CI -no-window -no-audio -no-snapshot -no-boot-anim -no-metrics -gpu swiftshader -memory 2048 > android-app/outputs/emulator.log 2>&1 &
+          timeout 180 adb wait-for-device
+          for attempt in $(seq 1 90); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then break; fi
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1
+          adb shell input keyevent 82
+      - name: Exercise offline racing and multiplayer in the installed app
+        working-directory: android-app
+        run: |
+          adb install -r app/build/outputs/apk/debug/app-debug.apk
+          adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          adb shell am instrument -w -e serverUrl http://10.0.2.2:3000 com.drawderby.app.test/androidx.test.runner.AndroidJUnitRunner | tee outputs/instrumentation.txt
+          grep -E 'OK \(3 tests\)' outputs/instrumentation.txt
+      - name: Collect device logs
+        if: always()
+        run: |
+          mkdir -p android-app/outputs
+          if adb get-state > /dev/null 2>&1; then
+            adb logcat -d -s DrawDerby:E AndroidRuntime:E > android-app/outputs/android-errors.log
+          fi
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: android-apk-and-checks
+          path: |
+            android-app/app/build/outputs/apk/
+            android-app/app/build/reports/
+            android-app/outputs/
