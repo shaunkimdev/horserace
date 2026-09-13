@@ -39,8 +39,16 @@ jobs:
           npm run build
       - name: Prepare Android SDK
         run: |
-          sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0' 'system-images;android-36;google_apis;x86_64'
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDK_MANAGER=$(find "$SDK_ROOT/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -1)
+          test -n "$SDK_MANAGER"
+          echo "$(dirname "$SDK_MANAGER")" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          "$SDK_MANAGER" 'platforms;android-37.0' 'build-tools;36.0.0' 'system-images;android-36;google_apis;x86_64'
           sudo chmod 666 /dev/kvm
+          "$SDK_ROOT/build-tools/36.0.0/apksigner" verify android-app/releases/DrawDerby-debug.apk
+          (cd android-app/releases && sha256sum -c DrawDerby-debug.apk.sha256)
       - name: Build APK and check Android code
         working-directory: android-app
         run: |
