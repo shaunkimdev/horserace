@@ -10,7 +10,7 @@ import android.webkit.WebView;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 
-import org.json.JSONObject;
+import org.json.JSONTokener;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -63,7 +63,7 @@ public class GameSmokeTest {
     private void await(String condition, long milliseconds) throws Exception {
         long until = SystemClock.uptimeMillis() + milliseconds;
         while (SystemClock.uptimeMillis() < until) {
-            if ("true".equals(js("Boolean(" + condition + ")"))) return;
+            if ("true".equals(js("(()=>{try{return Boolean(" + condition + ")}catch{return false}})()"))) return;
             SystemClock.sleep(150);
         }
         fail("Timed out: " + condition);
@@ -88,7 +88,7 @@ public class GameSmokeTest {
     }
 
     @Test public void offlineGameRacesOnAllFourTracksAndKeepsTheAnimal() throws Exception {
-        assertEquals(JSONObject.quote(MainActivity.OFFLINE_URL), js("location.href"));
+        assertEquals(MainActivity.OFFLINE_URL, new JSONTokener(js("location.href")).nextValue());
         instrumentation.runOnMainSync(() -> view.getSettings().setBlockNetworkLoads(true));
         reload();
         assertEquals("4", js("document.querySelectorAll('.track-card').length"));
@@ -106,7 +106,7 @@ public class GameSmokeTest {
             assertEquals("4", js("document.querySelectorAll('.result-row').length"));
             reload();
         }
-        assertEquals(JSONObject.quote("안드로이드 달리미"), js("document.querySelector('.name-field input').value"));
+        assertEquals("안드로이드 달리미", new JSONTokener(js("document.querySelector('.name-field input').value")).nextValue());
     }
 
     @Test public void failedConnectionCanReturnToOfflinePractice() throws Exception {
