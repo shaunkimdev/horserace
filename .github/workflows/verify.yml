@@ -43,6 +43,11 @@ jobs:
       - name: Prepare Android SDK
         run: |
           SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          # This Java/WebView app does not use the preinstalled multi-gigabyte NDKs.
+          # Reclaim space only inside this disposable GitHub-hosted runner's SDK.
+          test "$GITHUB_ACTIONS" = true
+          test "$(realpath "$SDK_ROOT")" = /usr/local/lib/android/sdk
+          if [ -d "$SDK_ROOT/ndk" ]; then rm -rf -- "$SDK_ROOT/ndk"; fi
           SDK_MANAGER=$(find "$SDK_ROOT/cmdline-tools" -type f -path '*/bin/sdkmanager' | sort -V | tail -1)
           test -n "$SDK_MANAGER"
           echo "$(dirname "$SDK_MANAGER")" >> "$GITHUB_PATH"
