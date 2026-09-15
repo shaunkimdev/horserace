@@ -58,6 +58,7 @@ public class GameSmokeTest {
     }
 
     private String js(String code) throws Exception {
+        assertFalse("Rotation must preserve the game Activity and its WebSocket", activity.isDestroyed());
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<String> result = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> view.evaluateJavascript(code, value -> { result.set(value); latch.countDown(); }));
