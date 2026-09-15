@@ -87,6 +87,11 @@ jobs:
             sleep 2
           done
           test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1
+          # This disposable emulator needs WebView, not Google Play services.
+          # Its first-boot FontsProvider ANR can kill dependent apps during tests.
+          # Disable it before the test app starts, so Android uses installed fonts.
+          test "$GITHUB_ACTIONS" = true
+          adb shell pm disable-user --user 0 com.google.android.gms
           adb shell input keyevent 82
           adb shell settings put global window_animation_scale 0
           adb shell settings put global transition_animation_scale 0
