@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getTrack, sampleRace, type Race, type Stroke } from "../lib/game";
 import { createRaceCamera, RACE_VIEW } from "../lib/race-camera";
 import { paintCourse, paintFence, paintObstacle } from "./race-scenery";
@@ -99,7 +99,6 @@ export function drawAnimal(
   ctx.restore();
 }
 
-const WIDTH = RACE_VIEW.width;
 const HEIGHT = RACE_VIEW.height;
 const INK = "#29352d";
 function ellipse(
@@ -171,7 +170,22 @@ export default function RaceCanvas({
   onFinish,
 }: RaceCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState<number>(RACE_VIEW.width);
   const completedRef = useRef<Race | null>(null);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const media = window.matchMedia("(orientation: landscape) and (max-height: 600px)");
+    const resize = () => setWidth(media.matches && wrap.clientHeight
+      ? Math.max(RACE_VIEW.width, Math.min(2800, Math.round(HEIGHT * wrap.clientWidth / wrap.clientHeight)))
+      : RACE_VIEW.width);
+    const observer = new ResizeObserver(resize);
+    observer.observe(wrap);
+    media.addEventListener("change", resize);
+    resize();
+    return () => { observer.disconnect(); media.removeEventListener("change", resize); };
+  }, []);
   useEffect(() => {
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
@@ -179,7 +193,8 @@ export default function RaceCanvas({
     const player =
       frame.racers.find((racer) => racer.id === playerId) ?? frame.racers[0];
     if (!player) return;
-    const camera = createRaceCamera(race.trackId, player.x, race.distance);
+    const WIDTH = width;
+    const camera = createRaceCamera(race.trackId, player.x, race.distance, race.participants.length, width);
     const t = Math.max(0, elapsed);
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
@@ -223,6 +238,10 @@ export default function RaceCanvas({
         ),
       );
       const isPlayer = participant.id === playerId;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(camera.racerScale, camera.racerScale);
+      ctx.translate(-x, -y);
       const color = participant.color || INK;
       const jumping = racer.y > 5;
       ellipse(
@@ -342,6 +361,7 @@ export default function RaceCanvas({
         ctx.font = "900 18px Arial, sans-serif";
         ctx.fillText(`${racer.place}위`, x + 99, y - 44);
       }
+      ctx.restore();
     });
 
     paintFence(ctx, camera, true);
@@ -379,17 +399,17 @@ export default function RaceCanvas({
       completedRef.current = race;
       onFinish?.();
     }
-  }, [race, elapsed, playerId, onFinish]);
+  }, [race, elapsed, playerId, onFinish, width]);
 
   return (
-    <div className="race-canvas-wrap">
+    <div className="race-canvas-wrap" ref={wrapRef}>
       <canvas
         ref={canvasRef}
-        width={WIDTH}
+        width={width}
         height={HEIGHT}
         style={{ width: "100%", height: "auto", display: "block" }}
         role="img"
-        aria-label={`${getTrack(race.trackId).name}. 내 동물을 가까이서 따라가며 점프와 코너 주행을 보여주는 최대 4인 레이싱 트랙`}
+        aria-label={`${getTrack(race.trackId).name}. 내 동물을 가까이서 따라가며 점프와 코너 주행을 보여주는 ${race.participants.length}인 레이싱 트랙`}
       >
         직접 그린 동물들의 장애물 레이싱. 아래 순위표에서 경기 진행 상황을
         확인할 수 있어요.

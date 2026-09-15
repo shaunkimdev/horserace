@@ -301,10 +301,10 @@ test('sampling supports before-start, interpolated, reconnect, and completed tim
   );
 });
 
-test('rooms reject more than four racers, duplicate identities, and blank drawings', () => {
+test('rooms reject more than eight racers, duplicate identities, and blank drawings', () => {
   assert.throws(() => generateRace([], 'invalid'));
   assert.throws(() =>
-    generateRace([...players, { ...players[0], id: 'extra' }], 'invalid'),
+    generateRace(Array.from({ length: 9 }, (_, i) => ({ ...players[i % 4], id: `player-${i}` })), 'invalid'),
   );
   assert.throws(() => generateRace([players[0], players[0]], 'invalid'));
   assert.throws(() =>

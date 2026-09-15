@@ -12,7 +12,7 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(origin),
     title: "DRAW DERBY — 그려요. 달려요.",
     description:
-      "당신의 낙서가 선수가 됩니다. 직접 그린 동물로 최대 4명이 함께 달리는 장애물 경주. 그림 실력은 선택, 다리는 필수!",
+      "당신의 낙서가 선수가 됩니다. 직접 그린 동물로 최대 8명이 함께 달리는 장애물 경주. 그림 실력은 선택, 다리는 필수!",
     openGraph: {
       title: "DRAW DERBY — 그려요. 달려요.",
       description:
@@ -24,7 +24,7 @@ export async function generateMetadata(): Promise<Metadata> {
     twitter: {
       card: "summary_large_image",
       title: "DRAW DERBY",
-      description: "당신의 낙서가 선수가 됩니다. 최대 4인 동물 레이싱.",
+      description: "당신의 낙서가 선수가 됩니다. 최대 8인 동물 레이싱.",
       images: [`${origin}/og.png`],
     },
   };

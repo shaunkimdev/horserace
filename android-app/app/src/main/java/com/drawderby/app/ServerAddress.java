@@ -4,8 +4,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Locale;
 
-/** Only a user-selected game origin may be loaded in the online WebView. */
+/** Only the configured game origin may be loaded in the online WebView. */
 public final class ServerAddress {
+    public static final String DEFAULT_ORIGIN = "https://draw-derby.musicapp.workers.dev";
+
     private ServerAddress() {}
 
     public static String normalize(String input) {

@@ -2,7 +2,8 @@
 
 declare namespace Cloudflare {
   interface Env {
-    DB: D1Database;
+    DB?: D1Database;
+    RACE_ROOMS: DurableObjectNamespace;
     ASSETS: Fetcher;
   }
 }

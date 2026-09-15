@@ -1,11 +1,5 @@
-import { readRoomBody, roomResponse, roomStore, roomToken } from '../../../../lib/room-api';
+import { env } from "cloudflare:workers";
+import { routeRoomRequest } from "../../../../worker/room-router";
 
-type Context = { params: Promise<{ code: string }> };
-
-export async function GET(request: Request, context: Context) {
-  return roomResponse(async () => roomStore().get((await context.params).code, roomToken(request)!));
-}
-
-export async function POST(request: Request, context: Context) {
-  return roomResponse(async () => roomStore().act((await context.params).code, roomToken(request)!, await readRoomBody(request)));
-}
+export const POST = (request: Request) => routeRoomRequest(request, env);
+export const GET = (request: Request) => routeRoomRequest(request, env);

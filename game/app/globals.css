@@ -492,6 +492,16 @@ body:has(.stage-race), html:has(.stage-race) { background: var(--mint); }
 }
 
 /* Four shared course choices, with the player's real drawing evaluated in each. */
+.room-capacity { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 0; margin-bottom:12px; border-bottom:1px solid var(--line); }
+.room-capacity > div:first-child { display:flex; flex-direction:column; gap:5px; }
+.room-capacity b { font-size:16px; }
+.room-capacity span { font-size:14px; color:var(--muted); }
+.capacity-stepper { display:flex; align-items:center; gap:6px; padding:4px; border:1px solid var(--line); border-radius:8px; background:#fbfcf450; flex-shrink:0; }
+.capacity-stepper button { width:44px; height:44px; border-radius:5px; background:var(--ink); color:var(--lime); font-size:25px; line-height:1; }
+.capacity-stepper button:disabled { opacity:.3; cursor:default; }
+.capacity-stepper output { min-width:48px; text-align:center; font-size:23px; font-weight:800; font-variant-numeric:tabular-nums; }
+.capacity-stepper small { margin-left:4px; font-size:14px; font-weight:500; }
+@media(max-width:400px) { .room-capacity { gap:8px; }.room-capacity span { max-width:145px; }.capacity-stepper { gap:2px; } }
 .track-picker{padding:29px 0 24px;border-bottom:1px solid var(--line)}
 .track-picker-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:19px}
 .track-picker-heading .eyebrow{font-size:8px;margin-bottom:7px;letter-spacing:1.5px}
@@ -520,3 +530,22 @@ body:has(.stage-race), html:has(.stage-race) { background: var(--mint); }
 @media(max-width:1000px){.track-options{gap:9px}.track-card{padding:12px}.track-card>strong{font-size:13px}.track-description{font-size:9px;min-height:47px}.track-strength{font-size:8px}.track-caution{font-size:8px}.track-card-top{font-size:7px}.track-estimate{font-size:8px}.track-estimate b{font-size:12px}}
 @media(max-width:720px){.track-picker{padding:25px 0 22px}.track-options{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.track-picker-heading{gap:12px;align-items:center}.track-picker-heading h2{font-size:20px}.track-picker-heading p{font-size:8px;max-width:125px}.track-card{padding:13px}.track-card>strong{font-size:14px}.track-description{min-height:35px}.track-mini-map{max-height:125px;object-fit:contain}.track-selection-note{font-size:8px;align-items:flex-start}.track-selection-note>.tiny-dot{margin-top:5px}.track-selection-note>b{display:none}.race-track-banner{gap:6px;flex-wrap:wrap;margin-top:14px}.race-track-banner b{font-size:11px}.race-track-banner span{font-size:9px}.lobby .track-picker-heading h2{font-size:18px}}
 @media(max-width:400px){.track-picker-heading p{display:none}.track-card{padding:11px}.track-card>strong{font-size:12px}.track-subtitle{font-size:7px}.track-description{font-size:8px;min-height:34px}.track-strength{font-size:8px}.track-caution{font-size:7px}.track-estimate{font-size:8px}.track-estimate b{font-size:11px}}
+
+/* Use the entire phone width during a landscape race, with no clipped fixed-width canvas. */
+@media (orientation: landscape) and (max-height: 600px) {
+  .app-shell.stage-race { height:100dvh; min-height:0; max-width:none; padding:0; overflow:hidden; }
+  .stage-race .site-header, .stage-race .site-footer, .stage-race .race-title,
+  .stage-race .race-track-banner, .stage-race .race-comment, .stage-race .obstacle-chips { display:none; }
+  .stage-race .race-section { height:100%; padding:0; display:grid; grid-template-rows:30px minmax(0,1fr) 24px; }
+  .stage-race .section-top { margin:0; padding:0 12px; align-items:center; }
+  .stage-race .section-top .eyebrow { margin:0; font-size:11px; }
+  .stage-race .race-timer { font-size:16px; }
+  .stage-race .race-stage { width:100%; min-height:0; margin:0; }
+  .stage-race .race-canvas-wrap { height:100%; min-height:0; }
+  .stage-race .race-canvas-wrap canvas { width:100% !important; height:100% !important; object-fit:contain; }
+  .stage-race .race-progress { width:calc(100% - 24px); min-height:0; margin:0 auto; }
+  .stage-race .live-standings { top:6px; right:8px; min-width:118px; gap:2px; max-height:calc(100% - 12px); overflow-y:auto; }
+  .stage-race .live-standings > div { min-height:24px; padding:3px 7px; gap:5px; font-size:12px; }
+  .stage-race .countdown { padding:0; }
+  .stage-race .countdown > strong { font-size:80px; }
+}

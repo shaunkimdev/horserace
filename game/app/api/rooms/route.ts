@@ -1,5 +1,4 @@
-import { readRoomBody, roomResponse, roomStore } from '../../../lib/room-api';
+import { env } from "cloudflare:workers";
+import { routeRoomRequest } from "../../../worker/room-router";
 
-export async function POST(request: Request) {
-  return roomResponse(async () => roomStore().create(await readRoomBody(request)), 201);
-}
+export const POST = (request: Request) => routeRoomRequest(request, env);

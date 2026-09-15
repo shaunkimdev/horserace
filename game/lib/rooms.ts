@@ -1,7 +1,9 @@
 import type { Animal, Participant, TrackId } from './game';
 
-export const ROOM_COLORS = ['#e9585e', '#4381dc', '#e6b43d', '#7b64c4'] as const;
-export const ROOM_CAPACITY = 4;
+export const ROOM_COLORS = ['#e9585e', '#4381dc', '#e6b43d', '#7b64c4', '#178675', '#dc772e', '#ba4f91', '#52763a'] as const;
+export const ROOM_DEFAULT_CAPACITY = 4;
+export const ROOM_MIN_CAPACITY = 2;
+export const ROOM_MAX_CAPACITY = 8;
 export const ROOM_COUNTDOWN_MS = 4000;
 
 export type RoomPlayer = {
@@ -33,6 +35,7 @@ export type RoomRace = {
 };
 
 export type Room = {
+  capacity: number;
   trackId: TrackId;
   code: string;
   hostId: string;
@@ -46,6 +49,7 @@ export type RoomResponse = { room: Room; serverNow: number; revision: number };
 /** Persist this locally to rejoin after a refresh. Tokens are never public. */
 export type RoomSession = RoomResponse & { playerId: string; token: string };
 export type RoomAction =
+  | { action: 'capacity'; capacity: number }
   | { action:'track'; trackId:TrackId }
   | { action: 'animal'; animal: Animal }
   | { action: 'ready'; ready: boolean }

@@ -416,8 +416,8 @@ export function trackAffinity(stats:ShapeStats,trackId:TrackId) {
 }
 
 export function generateRace(participants: Participant[], seed: string | number,trackId:TrackId=DEFAULT_TRACK): Race {
-  if (!Array.isArray(participants) || participants.length < 1 || participants.length > 4) {
-    throw new Error('레이스에는 1명부터 4명까지 참가할 수 있어요.');
+  if (!Array.isArray(participants) || participants.length < 1 || participants.length > 8) {
+    throw new Error('레이스에는 1명부터 8명까지 참가할 수 있어요.');
   }
   if (new Set(participants.map(p => p.id)).size !== participants.length) throw new Error('참가자 ID는 서로 달라야 해요.');
   const course = generateCourse(seed,trackId);

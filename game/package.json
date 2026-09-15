@@ -9,10 +9,12 @@
     "dev": "node scripts/run.mjs dev",
     "build": "node scripts/run.mjs build",
     "start": "node scripts/run.mjs start",
-    "test": "node --test tests/game.test.ts tests/audio.test.ts tests/camera.test.ts tests/rooms.test.mjs",
-    "test:server": "node --test tests/server-smoke.test.mjs",
+    "test": "node --experimental-strip-types --test tests/game.test.ts tests/audio.test.ts tests/camera.test.ts tests/rooms.test.mjs",
+    "test:server": "node --experimental-strip-types --test tests/server-smoke.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:check": "npm run build && wrangler deploy --dry-run"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
@@ -20,6 +22,7 @@
     "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "esbuild": "0.28.0",
     "@cloudflare/vite-plugin": "1.37.1",
     "@cloudflare/workers-types": "^4.20260702.1",
     "@eslint/js": "9.39.4",

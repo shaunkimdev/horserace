@@ -30,8 +30,12 @@ export function createRaceCamera(
   trackId: TrackId,
   followMetres: number,
   distance = 1000,
+  laneCount = 4,
+  width: number = RACE_VIEW.width,
 ) {
   const follow = Math.max(0, Math.min(distance, followMetres));
+  const laneSpacing = 400 / Math.max(4, laneCount);
+  const laneScale = laneSpacing / RACE_VIEW.laneSpacing;
   const lateralScale = RACE_VIEW.laneSpacing / 26;
   const metresToPixels = RACE_VIEW.pixelsPerMetre;
 
@@ -105,13 +109,19 @@ export function createRaceCamera(
 
   return {
     trackId,
+    width,
+    laneCount,
+    laneSpacing,
+    racerScale: Math.min(1, laneSpacing / 75),
+    laneLines: Array.from({ length: laneCount + 1 }, (_, i) =>
+      (i * laneSpacing - (laneCount - 1) * laneSpacing / 2 - 60 * laneScale) * 0.26),
     follow,
     from: follow - 130,
-    to: follow + 360,
+    to: follow + 360 + Math.max(0, width - RACE_VIEW.width) / metresToPixels,
     project,
-    /** Lane coordinates use the exact same 100 px spacing as the straight track. */
+    /** Keep all lanes inside the road; four-player framing remains unchanged. */
     surface: (metres: number, lane: number, across = 0) =>
-      project(metres, (lane * 100 - 150 + across) * 0.26),
+      project(metres, (lane * laneSpacing - (laneCount - 1) * laneSpacing / 2 + across * laneScale) * 0.26),
   };
 }
 

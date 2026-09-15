@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "draw-derby",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "RACE_ROOMS", "class_name": "RaceRoom" }],
+  },
+  "migrations": [
+    { "tag": "v1-race-rooms", "new_sqlite_classes": ["RaceRoom"] },
+  ],
+}

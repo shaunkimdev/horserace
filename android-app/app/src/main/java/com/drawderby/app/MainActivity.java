@@ -6,6 +6,7 @@ import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -38,6 +39,8 @@ import android.widget.Toast;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 import androidx.webkit.WebResourceErrorCompat;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -46,6 +49,8 @@ import org.json.JSONTokener;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.Arrays;
+import java.util.HashSet;
 
 public class MainActivity extends Activity {
     static final String OFFLINE_ORIGIN = "https://appassets.androidplatform.net";
@@ -58,19 +63,30 @@ public class MainActivity extends Activity {
     private SharedPreferences preferences;
     private FrameLayout content;
     private LinearLayout errorPanel;
+    private LinearLayout navigationBar;
     private TextView errorText;
     private ProgressBar progress;
     private Button soloButton, friendsButton;
-    private String serverOrigin = "", currentUrl = OFFLINE_URL, pendingDraft;
+    private String serverOrigin = ServerAddress.DEFAULT_ORIGIN, currentUrl = OFFLINE_URL, pendingDraft;
     private boolean online, pageFailed, paused;
+    private boolean raceScreen, screenBridgeInstalled;
+    private int previousOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
     private Runnable loadTimeout;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         preferences = getSharedPreferences("draw-derby", MODE_PRIVATE);
+        // Set the published server for fresh installs and upgrades from the LAN-only APK.
+        // Later user-selected addresses remain saved across launches.
+        if (!preferences.getBoolean("published-server-configured", false)) {
+            preferences.edit().putString("server", ServerAddress.DEFAULT_ORIGIN)
+                    .putBoolean("published-server-configured", true).apply();
+        }
         try {
-            serverOrigin = ServerAddress.normalize(preferences.getString("server", ""));
-        } catch (IllegalArgumentException ignored) { /* The first launch is fully offline. */ }
+            serverOrigin = ServerAddress.normalize(preferences.getString("server", ServerAddress.DEFAULT_ORIGIN));
+        } catch (IllegalArgumentException ignored) {
+            preferences.edit().putString("server", ServerAddress.DEFAULT_ORIGIN).apply();
+        }
         assetLoader = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -115,16 +131,12 @@ public class MainActivity extends Activity {
         root.addView(progress, new LinearLayout.LayoutParams(-1, dp(2)));
 
         LinearLayout bar = new LinearLayout(this);
+        navigationBar = bar;
         bar.setPadding(dp(8), dp(5), dp(8), dp(5));
         soloButton = button("혼자 연습", () -> {
             if (online) switchPage(OFFLINE_URL, false);
         });
-        friendsButton = button("친구와 경주", () -> {
-            if (!online) {
-                if (serverOrigin.isEmpty()) showConnectionDialog();
-                else switchPage(serverOrigin + "/?mode=friends", true);
-            }
-        });
+        friendsButton = button("친구와 경주", this::openMultiplayer);
         Button settingsButton = button("연결 설정", this::showConnectionDialog);
         for (Button item : new Button[]{soloButton, friendsButton, settingsButton}) {
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1);
@@ -175,7 +187,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled") // The bundled React/canvas game needs JavaScript; no native JS bridge is exposed.
+    @SuppressLint("SetJavaScriptEnabled") // Only trusted main frames can request race-screen orientation.
     private void createWebView() {
         webView = new WebView(this);
         webView.setBackgroundColor(LIME);
@@ -190,11 +202,12 @@ public class MainActivity extends Activity {
         settings.setTextZoom(100);
         settings.setSupportMultipleWindows(false);
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
+        configureScreenBridge();
         webView.setWebViewClient(new GameClient());
         webView.setWebChromeClient(new WebChromeClient() {
             @Override public void onProgressChanged(WebView view, int value) {
                 progress.setProgress(value);
-                progress.setVisibility(value == 100 || pageFailed ? View.INVISIBLE : View.VISIBLE);
+                progress.setVisibility(raceScreen ? View.GONE : value == 100 || pageFailed ? View.INVISIBLE : View.VISIBLE);
             }
             @Override public boolean onConsoleMessage(ConsoleMessage message) {
                 if (BuildConfig.DEBUG && message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
@@ -208,6 +221,7 @@ public class MainActivity extends Activity {
 
     private void loadPage(String url, boolean remote) {
         cancelTimeout();
+        setRaceScreen(false);
         if (webView == null) createWebView();
         currentUrl = url;
         online = remote;
@@ -222,7 +236,7 @@ public class MainActivity extends Activity {
         if (remote) {
             loadTimeout = () -> {
                 if (webView != null) webView.stopLoading();
-                showError("서버 응답이 늦어지고 있어요. 같은 Wi-Fi인지, 게임 서버가 실행 중인지 확인해 주세요.");
+                showError("서버 응답이 늦어지고 있어요. 인터넷 연결을 확인하고 잠시 후 다시 연결해 주세요.");
             };
             handler.postDelayed(loadTimeout, 25000);
         }
@@ -255,37 +269,109 @@ public class MainActivity extends Activity {
         view.evaluateJavascript("(()=>{const data=JSON.parse(" + encoded + ");let attempts=0;function restore(){if(document.documentElement.dataset.derbyReady==='true'){document.dispatchEvent(new CustomEvent('draw-derby-import',{detail:data}))}else if(++attempts<200){setTimeout(restore,50)}}restore()})()", null);
     }
 
+    private void openMultiplayer() {
+        if (online) return;
+        if (serverOrigin.isEmpty()) showConnectionDialog();
+        else switchPage(serverOrigin + "/?mode=friends", true);
+    }
+
+    private void configureScreenBridge() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        if (screenBridgeInstalled) WebViewCompat.removeWebMessageListener(webView, "DrawDerbyScreen");
+        WebViewCompat.addWebMessageListener(webView, "DrawDerbyScreen",
+                new HashSet<>(Arrays.asList(OFFLINE_ORIGIN, serverOrigin)),
+                (view, message, sourceOrigin, isMainFrame, reply) -> {
+                    if (!isMainFrame || !isGameUrl(sourceOrigin.toString()) || !isGameUrl(view.getUrl())) return;
+                    String mode = message.getData();
+                    if ("race".equals(mode) || "normal".equals(mode)) setRaceScreen("race".equals(mode));
+                });
+        screenBridgeInstalled = true;
+    }
+
+    private void observeRaceScreen(WebView view) {
+        // Observe the stage class, so both the bundled game and an already-deployed game work.
+        view.evaluateJavascript("""
+                (()=>{let attempts=0;function attach(){
+                  const root=document.querySelector('.app-shell');
+                  if(!root){if(++attempts<200)setTimeout(attach,50);return}
+                  if(window.derbyScreenObserver)window.derbyScreenObserver.disconnect();
+                  let previous;
+                  function update(){
+                    const mode=root.classList.contains('stage-race')?'race':'normal';
+                    if(mode===previous)return;previous=mode;
+                    if(mode==='race')window.scrollTo(0,0);
+                    if(window.DrawDerbyScreen)window.DrawDerbyScreen.postMessage(mode);
+                    else location.href='drawderby://screen/'+mode;
+                  }
+                  window.derbyScreenObserver=new MutationObserver(update);
+                  window.derbyScreenObserver.observe(root,{attributes:true,attributeFilter:['class']});
+                  update();
+                }attach()})()
+                """, null);
+    }
+
+    private void setRaceScreen(boolean racing) {
+        if (raceScreen == racing) return;
+        raceScreen = racing;
+        if (racing) {
+            previousOrientation = getRequestedOrientation();
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        } else setRequestedOrientation(previousOrientation);
+        navigationBar.setVisibility(racing ? View.GONE : View.VISIBLE);
+        progress.setVisibility(racing ? View.GONE : View.INVISIBLE);
+        if (Build.VERSION.SDK_INT >= 30) {
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                if (racing) controller.hide(WindowInsets.Type.systemBars());
+                else controller.show(WindowInsets.Type.systemBars());
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(racing
+                    ? View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    : View.SYSTEM_UI_FLAG_VISIBLE);
+        }
+        getWindow().getDecorView().requestApplyInsets();
+    }
+
     private void showConnectionDialog() {
         LinearLayout fields = new LinearLayout(this);
         fields.setOrientation(LinearLayout.VERTICAL);
         fields.setPadding(dp(24), dp(10), dp(24), 0);
         TextView note = new TextView(this);
-        note.setText("친구들과 같은 게임 서버 주소를 입력하세요.\n연결한 뒤 방을 만들거나 6자리 방 코드로 참가할 수 있어요.");
+        note.setText("기본 서버가 설정되어 있어요. 연결한 뒤 방을 만들거나 6자리 방 코드로 참가하세요.\n친구들도 같은 서버에 접속하면 함께 달릴 수 있어요.");
         note.setTextColor(INK);
         note.setPadding(0, 0, 0, dp(16));
         fields.addView(note);
         EditText address = new EditText(this);
         address.setSingleLine(true);
         address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        address.setHint("https://게임서버주소");
+        address.setHint(ServerAddress.DEFAULT_ORIGIN);
         address.setText(serverOrigin);
         address.setContentDescription("게임 서버 주소");
         fields.addView(address);
         TextView hint = new TextView(this);
-        hint.setText("같은 Wi-Fi의 PC에서 실행한다면\nhttp://PC의IP주소:3000\n\n에뮬레이터에서는 http://10.0.2.2:3000");
+        hint.setText("인터넷이 연결되어 있으면 서로 다른 장소에서도 함께 플레이할 수 있어요.\n직접 실행한 서버를 쓰려면 주소를 변경하세요.");
         hint.setTextSize(12);
         hint.setPadding(0, dp(12), 0, dp(4));
         fields.addView(hint);
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("친구와 경주 · 서버 연결")
-                .setView(fields).setNegativeButton("취소", null).setPositiveButton("연결하기", null).create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                .setView(fields).setNegativeButton("취소", null).setNeutralButton("기본 서버", null)
+                .setPositiveButton("연결하기", null).create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                address.setText(ServerAddress.DEFAULT_ORIGIN);
+                address.setError(null);
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             try {
                 String selected = ServerAddress.normalize(address.getText().toString());
                 // Capture the old origin's draft before trusting the newly selected origin.
                 switchToServer(selected);
                 dialog.dismiss();
             } catch (IllegalArgumentException e) { address.setError(e.getMessage()); }
-        }));
+            });
+        });
         dialog.show();
     }
 
@@ -304,6 +390,7 @@ public class MainActivity extends Activity {
     private void selectServer(String selected) {
         if (isFinishing() || isDestroyed()) return;
         serverOrigin = selected;
+        if (webView != null) configureScreenBridge();
         preferences.edit().putString("server", selected).apply();
         loadPage(selected + "/?mode=friends", true);
     }
@@ -315,6 +402,7 @@ public class MainActivity extends Activity {
 
     private void showError(String message) {
         cancelTimeout();
+        setRaceScreen(false);
         pageFailed = true;
         progress.setVisibility(View.INVISIBLE);
         errorText.setText(message);
@@ -340,8 +428,13 @@ public class MainActivity extends Activity {
 
         @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             String url = request.getUrl().toString();
+            if (request.isForMainFrame() && isGameUrl(view.getUrl())
+                    && (url.equals("drawderby://screen/race") || url.equals("drawderby://screen/normal"))) {
+                setRaceScreen(url.endsWith("/race"));
+                return true;
+            }
             if (url.equals("drawderby://connect") && ServerAddress.sameOrigin(view.getUrl(), OFFLINE_ORIGIN)) {
-                showConnectionDialog();
+                openMultiplayer();
                 return true;
             }
             if (isGameUrl(url)) return false;
@@ -357,12 +450,13 @@ public class MainActivity extends Activity {
             if (pageFailed || !isGameUrl(url)) return;
             cancelTimeout();
             importPendingDraft(view);
+            observeRaceScreen(view);
             view.evaluateJavascript("document.dispatchEvent(new CustomEvent('draw-derby-visibility',{detail:{visible:" + !paused + "}}))", null);
         }
 
         @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceErrorCompat error) {
             if (request.isForMainFrame()) showError(online
-                    ? "게임 서버에 연결하지 못했어요. 서버 주소와 Wi-Fi 연결을 확인해 주세요. 혼자 연습은 인터넷 없이도 할 수 있어요."
+                    ? "게임 서버에 연결하지 못했어요. 서버 주소와 인터넷 연결을 확인해 주세요. 혼자 연습은 인터넷 없이도 할 수 있어요."
                     : "게임을 불러오지 못했어요. 다시 실행하거나 Android System WebView를 업데이트해 주세요.");
         }
 
@@ -374,6 +468,7 @@ public class MainActivity extends Activity {
             content.removeView(view);
             view.destroy();
             webView = null;
+            screenBridgeInstalled = false;
             showError("게임 화면이 잠시 멈췄어요. 다시 연결하면 저장한 동물로 계속할 수 있어요.");
             return true;
         }

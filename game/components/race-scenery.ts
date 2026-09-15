@@ -8,9 +8,9 @@ import {
 import { RACE_VIEW, type RaceCamera } from "../lib/race-camera.ts";
 
 const INK = "#29352d";
-const visible = (p: Point, margin = 180) =>
+const visible = (p: Point, margin = 180, width: number = RACE_VIEW.width) =>
   p.x > -margin &&
-  p.x < RACE_VIEW.width + margin &&
+  p.x < width + margin &&
   p.y > -margin &&
   p.y < RACE_VIEW.height + margin;
 
@@ -101,7 +101,7 @@ export function paintFence(
     );
   for (let m = Math.floor(camera.from / 46) * 46; m <= camera.to; m += 46) {
     const p = camera.project(m, offset);
-    if (!visible(p, 60)) continue;
+    if (!visible(p, 60, camera.width)) continue;
     line(
       ctx,
       { x: p.x + 3, y: p.y + 2 },
@@ -167,14 +167,14 @@ export function paintCourse(
   time: number,
 ) {
   ctx.fillStyle = race.trackId === "woodland" ? "#dce8cf" : "#e5eed3";
-  ctx.fillRect(0, 0, RACE_VIEW.width, RACE_VIEW.height);
+  ctx.fillRect(0, 0, camera.width, RACE_VIEW.height);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   const track = getTrack(race.trackId);
   for (let m = Math.floor(camera.from / 35) * 35; m <= camera.to; m += 35) {
     for (const side of [-86, 83]) {
       const p = camera.project(m, side + Math.sin(m * 0.3) * 7);
-      if (!visible(p, 100)) continue;
+      if (!visible(p, 100, camera.width)) continue;
       if (race.trackId === "woodland") {
         line(ctx, p, raised(p, 36), "#83936b", 5);
         ellipse(ctx, raised(p, 46), 28, 31, "#b4c995");
@@ -212,7 +212,7 @@ export function paintCourse(
     [...edge(camera, -57.2), ...edge(camera, 50.7, camera.to, camera.from)],
     "#fbfcf4",
   );
-  for (const offset of [-54.6, -28.6, -2.6, 23.4, 49.4])
+  for (const offset of camera.laneLines)
     strokeEdge(ctx, edge(camera, offset), "#e8ecdf", 1.5);
   paintFence(ctx, camera);
   for (
@@ -221,7 +221,7 @@ export function paintCourse(
     m += 100
   ) {
     const p = camera.project(m, 57.2);
-    if (!visible(p, 30)) continue;
+    if (!visible(p, 30, camera.width)) continue;
     ctx.font = "600 11px Arial, sans-serif";
     ctx.textAlign = "center";
     ctx.fillStyle = "#8fa27e";
@@ -237,7 +237,7 @@ export function paintCourse(
       const turn = trackPoint(race.trackId, m / race.distance).turn;
       if (Math.abs(turn) < 0.4) continue;
       const p = raised(camera.project(m, -63), 44);
-      if (!visible(p, 40)) continue;
+      if (!visible(p, 40, camera.width)) continue;
       ctx.fillStyle = track.color;
       ctx.beginPath();
       ctx.roundRect(p.x - 14, p.y - 14, 28, 25, 4);
@@ -266,7 +266,7 @@ export function paintObstacle(
   const p = (u: number, across = 0, height = 0) =>
     raised(
       camera.surface(obstacle.x + u / RACE_VIEW.pixelsPerMetre, lane, across),
-      height,
+      height * camera.racerScale,
     );
   const run = (start: number, end: number, across: number, height = 0) => {
     const count = Math.max(2, Math.ceil(Math.abs(end - start) / 10));

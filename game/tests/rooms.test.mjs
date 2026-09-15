@@ -1,732 +1,459 @@
-import assert from 'node:assert/strict';
-import test, { after, before } from 'node:test';
-import { readFile } from 'node:fs/promises';
-import ts from 'typescript';
-import { Miniflare } from 'miniflare';
+import assert from "node:assert/strict";
+import test, { before, after } from "node:test";
+import { build } from "esbuild";
+import { Miniflare } from "miniflare";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
-// Execute the production source without filesystem output; D1 runs in workerd.
-const moduleUrl = (source) =>
-  `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-async function compile(relativePath, replacements = {}) {
-  const source = await readFile(new URL(relativePath, import.meta.url), 'utf8');
-  let js = ts.transpileModule(source, {
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.ESNext,
-    },
-  }).outputText;
-  for (const [from, to] of Object.entries(replacements))
-    js = js
-      .replace(`from '${from}'`, `from '${to}'`)
-      .replace(`from "${from}"`, `from "${to}"`);
-  return moduleUrl(
-    `${js}\n//# sourceURL=draw-derby-test/${relativePath.replace('../', '')}`,
-  );
-}
-const gameUrl = await compile('../lib/game.ts');
-const roomsUrl = await compile('../lib/rooms.ts');
-const storeUrl = await compile('../lib/room-store.ts', {
-  './game': gameUrl,
-  './rooms': roomsUrl,
-});
-const { RoomStore, RoomError, sanitizeAnimal } = await import(storeUrl);
-const { SAMPLE_ANIMALS, generateRace } = await import(gameUrl);
-const dbUrl = moduleUrl(
-  "export function getRoomDatabase() { return globalThis[Symbol.for('room-test-database')]; }",
+const root = fileURLToPath(new URL("../", import.meta.url));
+const bundle = async (source) =>
+  (
+    await build({
+      stdin: { contents: source, resolveDir: root, loader: "ts" },
+      bundle: true,
+      write: false,
+      format: "esm",
+      platform: "neutral",
+      target: "es2022",
+      external: ["cloudflare:workers"],
+    })
+  ).outputFiles[0].text;
+const domain = await bundle(
+  "export * from './lib/game'; export * from './lib/room-state'; export * from './lib/room-validation';",
 );
-const apiUrl = await compile('../lib/room-api.ts', {
-  '../db': dbUrl,
-  './room-store': storeUrl,
-});
-const createRoute = await import(
-  await compile('../app/api/rooms/route.ts', {
-    '../../../lib/room-api': apiUrl,
-  })
+const {
+  SAMPLE_ANIMALS,
+  generateRace,
+  RoomState,
+  hashToken,
+  sanitizeAnimal,
+  RoomError,
+} = await import(
+  `data:text/javascript;base64,${Buffer.from(domain).toString("base64")}`
 );
-const joinRoute = await import(
-  await compile('../app/api/rooms/join/route.ts', {
-    '../../../../lib/room-api': apiUrl,
-  })
-);
-const roomRoute = await import(
-  await compile('../app/api/rooms/[code]/route.ts', {
-    '../../../../lib/room-api': apiUrl,
-  })
-);
-let miniflare;
-let db;
-
-before(async () => {
-  miniflare = new Miniflare({
-    modules: true,
-    script:
-      'export default { fetch() { return new Response("room tests"); } };',
-    compatibilityDate: '2026-04-01',
-    d1Databases: ['DB'],
-  });
-  db = await miniflare.getD1Database('DB');
-  globalThis[Symbol.for('room-test-database')] = db;
-  const migration = await readFile(
-    new URL('../drizzle/0000_outstanding_loki.sql', import.meta.url),
-    'utf8',
-  );
-  for (const statement of migration.split('--> statement-breakpoint')) {
-    if (statement.trim()) await db.prepare(statement.trim()).run();
-  }
-});
-after(async () => {
-  delete globalThis[Symbol.for('room-test-database')];
-  await miniflare?.dispose();
-});
-
-function setup() {
-  let now = 1_900_000_000_000;
-  return {
-    store: new RoomStore(db, () => now),
-    advance: (ms) => {
-      now += ms;
-    },
-  };
-}
-const isStatus = (status) => (error) =>
-  error instanceof RoomError && error.status === status;
 const profile = (i = 0) => ({
-  name: `참가자 ${i + 1}`,
+  name: `Player ${i}`,
   animal: structuredClone(SAMPLE_ANIMALS[i % 4]),
 });
+const connected = (state) =>
+  new Set(state.record.room.players.map((p) => p.id));
+const status = (code) => (error) =>
+  error instanceof RoomError && error.status === code;
 
-async function readyRoom(store, count = 2) {
-  const host = await store.create(profile());
-  const sessions = [host];
-  for (let i = 1; i < count; i++)
-    sessions.push(await store.join({ code: host.room.code, ...profile(i) }));
-  for (const session of sessions)
-    await store.act(host.room.code, session.token, {
-      action: 'ready',
-      ready: true,
+test("state rules enforce capacity, credentials, host privileges and all tracks", async () => {
+  for (const trackId of ["straight", "oval", "zigzag", "woodland"]) {
+    const state = new RoomState(null, 1_900_000_000_000);
+    const host = state.create("ABC234", { ...profile(), trackId }, "host");
+    const guest = state.join(profile(1), "guest");
+    state.join(profile(2), "third");
+    state.join(profile(3), "fourth");
+    assert.throws(() => state.join(profile(), "fifth"), status(409));
+    assert.throws(() => state.authenticate("invented"), status(401));
+    assert.throws(
+      () => state.act("guest", { action: "start" }, connected(state)),
+      status(403),
+    );
+    assert.throws(
+      () => state.act("host", { action: "start" }, connected(state)),
+      status(409),
+    );
+    for (const token of ["host", "guest", "third", "fourth"])
+      state.act(token, { action: "ready", ready: true }, connected(state));
+    state.act("host", { action: "start" }, connected(state));
+    const race = state.record.room.race;
+    assert.equal(race.trackId, trackId);
+    assert.deepEqual(
+      race.results.map((r) => r.playerId),
+      generateRace(race.players, race.seed, trackId).results.map((r) => r.id),
+    );
+    assert.throws(
+      () =>
+        state.act(
+          "host",
+          { action: "track", trackId: "oval" },
+          connected(state),
+        ),
+      status(409),
+    );
+    assert.throws(
+      () => state.act("host", { action: "rematch" }, connected(state)),
+      status(409),
+    );
+    state.act("host", { action: "leave" }, connected(state));
+    assert.equal(state.record.room.hostId, guest);
+    assert.ok(race.players.some((p) => p.id === host));
+    const publicData = JSON.stringify(state.snapshot(connected(state)));
+    assert.ok(!publicData.includes("tokenHash"));
+    assert.ok(!publicData.includes("disconnectedAt"));
+  }
+  for (const value of [
+    null,
+    { strokes: [] },
+    {
+      ...profile().animal,
+      strokes: Array(81).fill(profile().animal.strokes[0]),
+    },
+  ])
+    assert.throws(() => sanitizeAnimal(value));
+  const bad = profile().animal;
+  bad.strokes[0].points[0].x = Infinity;
+  assert.throws(() => sanitizeAnimal(bad), status(400));
+  assert.throws(
+    () =>
+      new RoomState(null, Date.now()).create(
+        "ABC234",
+        { ...profile(), trackId: "unknown" },
+        "a",
+      ),
+    status(400),
+  );
+  await assert.rejects(hashToken(""), status(401));
+});
+
+test("capacity defaults to four, persists across upgrades, and only the host can choose 2-8 seats", () => {
+  const state = new RoomState(null, Date.now());
+  state.create("ABC234", profile(), "host");
+  assert.equal(state.record.room.capacity, 4);
+  const legacy = structuredClone(state.record);
+  delete legacy.room.capacity;
+  assert.equal(new RoomState(legacy, Date.now()).snapshot(new Set()).room.capacity, 4);
+  for (const capacity of [null, 1, 9, 3.5, "8", NaN]) {
+    assert.throws(() => state.act("host", { action: "capacity", capacity }, connected(state)), status(400));
+    assert.throws(() => new RoomState(null, Date.now()).create("ABC234", { ...profile(), capacity }, "host"), status(400));
+  }
+  for (const capacity of [2, 8]) {
+    const room = new RoomState(null, Date.now());
+    room.create("ABC234", { ...profile(), capacity }, "host");
+    for (let i = 1; i < capacity; i++) room.join(profile(i), `guest-${i}`);
+    assert.equal(new Set(room.record.room.players.map(p => p.color)).size, capacity);
+    assert.throws(() => room.join(profile(), "overflow"), status(409));
+    assert.throws(() => room.act("guest-1", { action: "capacity", capacity: 4 }, connected(room)), status(403));
+    if (capacity === 8) assert.throws(() => room.act("host", { action: "capacity", capacity: 7 }, connected(room)), status(409));
+    for (const p of room.record.room.players) room.act(p.tokenHash, { action: "ready", ready: true }, connected(room));
+    room.act("host", { action: "start" }, connected(room));
+    assert.equal(room.record.room.race.results.length, capacity);
+    assert.throws(() => room.act("host", { action: "capacity", capacity: 8 }, connected(room)), status(409));
+  }
+  state.act("host", { action: "capacity", capacity: 8 }, connected(state));
+  assert.equal(new RoomState(structuredClone(state.record), Date.now()).snapshot(connected(state)).room.capacity, 8);
+  state.act("host", { action: "capacity", capacity: 2 }, connected(state));
+  assert.equal(state.record.room.capacity, 2);
+});
+
+test("quiet sockets stay present; disconnection transfers host and removes absent players on deadlines", () => {
+  const now = 1_900_000_000_000;
+  const state = new RoomState(null, now);
+  const host = state.create("ABC234", profile(), "host");
+  const guest = state.join(profile(1), "guest");
+  state.connect("host");
+  state.connect("guest");
+  const quiet = new RoomState(structuredClone(state.record), now + 90_000);
+  quiet.maintain(new Set([host, guest]));
+  assert.equal(quiet.record.room.players.length, 2);
+  assert.equal(quiet.record.room.hostId, host);
+  quiet.maintain(new Set([guest]));
+  const transferred = new RoomState(quiet.record, now + 110_000);
+  transferred.maintain(new Set([guest]));
+  assert.equal(transferred.record.room.hostId, guest);
+  const removed = new RoomState(transferred.record, now + 150_000);
+  removed.maintain(new Set([guest]));
+  assert.equal(removed.record.room.players.length, 1);
+  assert.throws(() => removed.authenticate("host"), status(401));
+  const expired = new RoomState(removed.record, now + 8_000_000);
+  expired.maintain(new Set());
+  assert.equal(expired.record, null);
+});
+
+test("track edits revoke readiness; server time finishes races; rematch preserves drawings", () => {
+  const now = 1_900_000_000_000;
+  const state = new RoomState(null, now);
+  state.create("ABC234", profile(), "host");
+  state.join(profile(1), "guest");
+  for (const token of ["host", "guest"]) {
+    state.connect(token);
+    state.act(token, { action: "ready", ready: true }, connected(state));
+  }
+  state.act("host", { action: "track", trackId: "oval" }, connected(state));
+  assert.ok(state.record.room.players.every((p) => !p.ready));
+  for (const token of ["host", "guest"])
+    state.act(token, { action: "ready", ready: true }, connected(state));
+  assert.throws(
+    () => state.act("host", { action: "start" }, new Set()),
+    status(409),
+  );
+  state.act("host", { action: "start" }, connected(state));
+  const race = state.record.room.race;
+  const finish = new RoomState(state.record, race.startedAt + race.durationMs);
+  finish.maintain(connected(finish));
+  assert.equal(finish.record.room.phase, "finished");
+  finish.act("host", { action: "rematch" }, connected(finish));
+  assert.equal(finish.record.room.race, null);
+  assert.ok(finish.record.room.players.every((p) => !p.ready && p.animal));
+});
+
+let mf, options, persistence;
+const sockets = new Set();
+before(async () => {
+  persistence = await mkdtemp(join(tmpdir(), "draw-derby-do-"));
+  // These inspection routes are in the test subclass only, never in the production Worker.
+  const script = await bundle(`
+    import { RaceRoom as ProductionRoom } from './worker/race-room';
+    import { routeRoomRequest } from './worker/room-router';
+    export class RaceRoom extends ProductionRoom {
+      async fetch(request) {
+        const path = new URL(request.url).pathname;
+        if (path === '/__inspect') return Response.json(await this.ctx.storage.get('room') ?? null);
+        if (path === '/__finish') {
+          const record = await this.ctx.storage.get('room');
+          record.room.race.startedAt = Date.now() - record.room.race.durationMs;
+          await this.ctx.storage.put('room', record);
+          await this.ctx.storage.setAlarm(Date.now() + 50);
+          return new Response('ok');
+        }
+        return super.fetch(request);
+      }
+    }
+    export default { fetch: (request, env) => routeRoomRequest(request, env) };
+  `);
+  options = {
+    modules: true,
+    script,
+    compatibilityDate: "2026-04-01",
+    durableObjects: { RACE_ROOMS: { className: "RaceRoom", useSQLite: true } },
+    durableObjectsPersist: persistence,
+  };
+  mf = new Miniflare(options);
+  await mf.ready;
+});
+after(async () => {
+  for (const ws of sockets)
+    try {
+      ws.close();
+    } catch {
+      /* Already closed. */
+    }
+  await mf?.dispose();
+  if (
+    persistence &&
+    resolve(persistence).startsWith(resolve(tmpdir()) + sep + "draw-derby-do-")
+  )
+    await rm(persistence, { recursive: true, force: true });
+});
+async function request(path, body, token, headers = {}) {
+  const response = await mf.dispatchFetch(`https://race.example${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  return {
+    status: response.status,
+    data: await response.json(),
+    headers: response.headers,
+  };
+}
+async function inspect(code, path = "/__inspect") {
+  const ns = await mf.getDurableObjectNamespace("RACE_ROOMS");
+  const response = await ns
+    .get(ns.idFromName(code))
+    .fetch(`https://race.example${path}`);
+  return path === "/__inspect" ? response.json() : response.text();
+}
+function peer(ws) {
+  const queue = [],
+    waiters = [];
+  ws.addEventListener("message", (event) => {
+    const data = event.data === "pong" ? "pong" : JSON.parse(event.data);
+    const index = waiters.findIndex((w) => w.predicate(data));
+    if (index >= 0) {
+      const waiter = waiters.splice(index, 1)[0];
+      clearTimeout(waiter.timer);
+      waiter.resolve(data);
+    } else queue.push(data);
+  });
+  const next = (predicate) => {
+    const index = queue.findIndex(predicate);
+    if (index >= 0) return Promise.resolve(queue.splice(index, 1)[0]);
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        predicate,
+        resolve,
+        timer: setTimeout(() => {
+          waiters.splice(waiters.indexOf(waiter), 1);
+          reject(new Error("WebSocket message timed out"));
+        }, 6000),
+      };
+      waiters.push(waiter);
     });
-  return sessions;
+  };
+  let sequence = 0;
+  return {
+    ws,
+    next,
+    async act(action) {
+      const id = String(++sequence);
+      ws.send(JSON.stringify({ type: "action", id, action }));
+      return next((m) => m.id === id);
+    },
+  };
+}
+async function connect(session) {
+  const response = await mf.dispatchFetch(
+    `https://race.example/api/rooms/${session.room.code}/socket`,
+    {
+      headers: {
+        Upgrade: "websocket",
+        Origin: "https://race.example",
+        "Sec-WebSocket-Protocol": `draw-derby.v1, token.${session.token}`,
+      },
+    },
+  );
+  assert.equal(response.status, 101);
+  assert.equal(response.headers.get("Sec-WebSocket-Protocol"), "draw-derby.v1");
+  const ws = response.webSocket;
+  const client = peer(ws);
+  sockets.add(ws);
+  ws.accept();
+  await client.next((m) => m.type === "state");
+  return client;
 }
 
-test('real D1 concurrent joins never exceed four players and use distinct colors', async () => {
-  const { store } = setup();
-  const host = await store.create(profile());
-  const attempts = await Promise.allSettled(
+test("SQLite Durable Object serializes simultaneous joins and pushes one race to four sockets", async () => {
+  const host = (await request("/api/rooms", profile())).data;
+  const code = host.room.code;
+  const clients = [await connect(host)];
+  const joins = await Promise.all(
     Array.from({ length: 9 }, (_, i) =>
-      store.join({ code: host.room.code, ...profile(i + 1) }),
+      request("/api/rooms/join", { code, ...profile(i + 1) }),
     ),
   );
-  assert.equal(
-    attempts.filter((result) => result.status === 'fulfilled').length,
-    3,
-  );
-  for (const result of attempts.filter(
-    (result) => result.status === 'rejected',
-  ))
-    assert.equal(result.reason.status, 409);
-  const { room } = await store.get(host.room.code, host.token);
-  assert.equal(room.players.length, 4);
-  assert.equal(new Set(room.players.map((player) => player.color)).size, 4);
-  assert.equal(new Set(room.players.map((player) => player.id)).size, 4);
-});
-
-test('the host selects a shared track and changing it clears every readiness flag', async () => {
-  const { store } = setup();
-  const host = await store.create({ ...profile(0), trackId: 'oval' });
-  const guest = await store.join({
-    code: host.room.code,
-    ...profile(1),
-    trackId: 'woodland',
-  });
-  assert.equal(guest.room.trackId, 'oval');
-  await store.act(host.room.code, host.token, { action: 'ready', ready: true });
-  await store.act(host.room.code, guest.token, {
-    action: 'ready',
-    ready: true,
-  });
-  await assert.rejects(
-    () =>
-      store.act(host.room.code, guest.token, {
-        action: 'track',
-        trackId: 'zigzag',
-      }),
-    isStatus(403),
-  );
-  const same = await store.act(host.room.code, host.token, {
-    action: 'track',
-    trackId: 'oval',
-  });
-  assert.ok(same.room.players.every((p) => p.ready));
-  const changed = await store.act(host.room.code, host.token, {
-    action: 'track',
-    trackId: 'zigzag',
-  });
-  assert.equal(changed.room.trackId, 'zigzag');
-  assert.ok(changed.room.players.every((p) => !p.ready));
-  await assert.rejects(
-    () => store.act(host.room.code, host.token, { action: 'start' }),
-    isStatus(409),
-  );
-  assert.equal(
-    (await store.get(host.room.code, guest.token)).room.trackId,
-    'zigzag',
-  );
-});
-
-test('all four selected tracks are snapshotted, reproducible and locked during racing', async () => {
-  for (const trackId of ['straight', 'oval', 'zigzag', 'woodland']) {
-    const { store, advance } = setup();
-    const host = await store.create({ ...profile(0), trackId });
-    const guest = await store.join({ code: host.room.code, ...profile(1) });
-    for (const member of [host, guest])
-      await store.act(host.room.code, member.token, {
-        action: 'ready',
-        ready: true,
-      });
-    const started = await store.act(host.room.code, host.token, {
-      action: 'start',
-      trackId: 'invented',
-    });
-    const snapshot = started.room.race;
-    assert.equal(snapshot.trackId, trackId);
-    assert.deepEqual(
-      snapshot.results.map((r) => r.playerId),
-      generateRace(
-        snapshot.players,
-        snapshot.seed,
-        snapshot.trackId,
-      ).results.map((r) => r.id),
-    );
-    await assert.rejects(
-      () =>
-        store.act(host.room.code, host.token, {
-          action: 'track',
-          trackId: trackId === 'straight' ? 'oval' : 'straight',
-        }),
-      isStatus(409),
-    );
-    assert.deepEqual(
-      (await store.join({ code: host.room.code }, guest.token)).room.race,
-      snapshot,
-    );
-    // Heartbeat while server time advances, matching two connected browsers.
-    let remaining =
-      snapshot.startedAt + snapshot.durationMs - started.serverNow + 1;
-    while (remaining > 0) {
-      const step = Math.min(10000, remaining);
-      advance(step);
-      remaining -= step;
-      await store.get(host.room.code, host.token);
-      await store.get(host.room.code, guest.token);
-    }
-    const replay = await store.act(host.room.code, host.token, {
-      action: 'rematch',
-    });
-    assert.equal(replay.room.trackId, trackId);
-    assert.equal(replay.room.race, null);
-  }
-});
-
-test('track changes and starts serialize without starting on an unapproved course', async () => {
-  const { store } = setup();
-  const [host] = await readyRoom(store);
-  const changes = await Promise.allSettled([
-    store.act(host.room.code, host.token, {
-      action: 'track',
-      trackId: 'zigzag',
-    }),
-    store.act(host.room.code, host.token, { action: 'start' }),
-  ]);
-  assert.equal(changes.filter((r) => r.status === 'fulfilled').length, 1);
-  assert.equal(changes.find((r) => r.status === 'rejected').reason.status, 409);
-  const final = (await store.get(host.room.code, host.token)).room;
-  if (final.phase === 'racing') assert.equal(final.race.trackId, 'straight');
-  else {
-    assert.equal(final.trackId, 'zigzag');
-    assert.ok(final.players.every((p) => !p.ready));
-  }
-});
-
-test('unknown tracks are rejected and legacy stored lobbies default to the straight track', async () => {
-  const { store } = setup();
-  await assert.rejects(
-    () => store.create({ ...profile(), trackId: '../track' }),
-    isStatus(400),
-  );
-  const host = await store.create(profile());
-  await assert.rejects(
-    () =>
-      store.act(host.room.code, host.token, { action: 'track', trackId: 42 }),
-    isStatus(400),
-  );
-  const row = await db
-    .prepare('SELECT data FROM race_rooms WHERE code = ?')
-    .bind(host.room.code)
-    .first();
-  const legacy = JSON.parse(row.data);
-  delete legacy.trackId;
-  await db
-    .prepare('UPDATE race_rooms SET data = ? WHERE code = ?')
-    .bind(JSON.stringify(legacy), host.room.code)
-    .run();
-  assert.equal(
-    (await store.get(host.room.code, host.token)).room.trackId,
-    'straight',
-  );
-});
-
-test('public revisions increase on every committed heartbeat and mutation under concurrency', async () => {
-  const { store } = setup();
-  const host = await store.create(profile());
-  assert.equal(host.revision, 1);
-  const joined = await store.join({ code: host.room.code, ...profile(1) });
-  assert.equal(joined.revision, 2);
-  const responses = await Promise.all([
-    store.get(host.room.code, host.token),
-    store.act(host.room.code, joined.token, { action: 'ready', ready: true }),
-    store.get(host.room.code, joined.token),
-    store.act(host.room.code, host.token, {
-      action: 'animal',
-      animal: SAMPLE_ANIMALS[2],
-    }),
-  ]);
-  assert.deepEqual(
-    responses.map((response) => response.revision).sort((a, b) => a - b),
-    [3, 4, 5, 6],
-  );
-  const latest = await store.get(host.room.code, host.token);
-  assert.equal(latest.revision, 7);
-  const raw = await db
-    .prepare('SELECT version FROM race_rooms WHERE code = ?')
-    .bind(host.room.code)
-    .first();
-  assert.equal(raw.version, latest.revision);
-});
-
-test('animal rename updates the authoritative participant name with a 20-character limit', async () => {
-  const { store } = setup();
-  const [host, guest] = await readyRoom(store);
-  const newName = '가'.repeat(24);
-  const renamed = await store.act(host.room.code, guest.token, {
-    action: 'animal',
-    animal: { ...structuredClone(SAMPLE_ANIMALS[1]), name: newName },
-  });
-  const player = renamed.room.players.find(
-    (member) => member.id === guest.playerId,
-  );
-  assert.equal(player.name, newName.slice(0, 20));
-  assert.equal(player.animal.name, newName);
-  assert.equal(player.ready, false);
-  await store.act(host.room.code, guest.token, {
-    action: 'ready',
-    ready: true,
-  });
-  const started = await store.act(host.room.code, host.token, {
-    action: 'start',
-  });
-  assert.equal(
-    started.room.race.players.find((member) => member.id === guest.playerId)
-      .name,
-    newName.slice(0, 20),
-  );
-});
-
-test('rooms expose no credentials and reject missing, foreign, or invented identities', async () => {
-  const { store } = setup();
-  const [host, guest] = await readyRoom(store);
-  const outsider = await store.create(profile(2));
-  const serialized = JSON.stringify(
-    (await store.get(host.room.code, guest.token)).room,
-  );
-  for (const privateValue of [
-    'tokenHash',
-    'lastSeenAt',
-    host.token,
-    guest.token,
-  ])
-    assert.ok(!serialized.includes(privateValue));
-  await assert.rejects(store.get(host.room.code, ''), isStatus(401));
-  await assert.rejects(
-    store.get(host.room.code, outsider.token),
-    isStatus(401),
-  );
-  await assert.rejects(
-    store.act(host.room.code, outsider.token, {
-      action: 'leave',
-      playerId: host.playerId,
-    }),
-    isStatus(401),
-  );
-  await assert.rejects(
-    store.act(host.room.code, guest.token, { action: 'start' }),
-    isStatus(403),
-  );
-  const ownChange = await store.act(host.room.code, guest.token, {
-    action: 'ready',
-    ready: false,
-    playerId: host.playerId,
-  });
-  assert.equal(
-    ownChange.room.players.find((player) => player.id === host.playerId).ready,
-    true,
-  );
-  assert.equal(
-    ownChange.room.players.find((player) => player.id === guest.playerId).ready,
-    false,
-  );
-  const raw = await db
-    .prepare('SELECT data FROM race_rooms WHERE code = ?')
-    .bind(host.room.code)
-    .first();
-  assert.ok(!raw.data.includes(host.token));
-});
-
-test('empty animal cannot become ready, all players must be ready, edits revoke readiness', async () => {
-  const { store } = setup();
-  const host = await store.create({ name: '새 동물' });
-  await assert.rejects(
-    store.act(host.room.code, host.token, { action: 'ready', ready: true }),
-    isStatus(400),
-  );
-  await store.act(host.room.code, host.token, {
-    action: 'animal',
-    animal: SAMPLE_ANIMALS[0],
-  });
-  await store.act(host.room.code, host.token, { action: 'ready', ready: true });
-  await assert.rejects(
-    store.act(host.room.code, host.token, { action: 'start' }),
-    isStatus(409),
-  );
-  const guest = await store.join({ code: host.room.code, ...profile(1) });
-  await assert.rejects(
-    store.act(host.room.code, host.token, { action: 'start' }),
-    isStatus(409),
-  );
-  await store.act(host.room.code, guest.token, {
-    action: 'ready',
-    ready: true,
-  });
-  const changed = await store.act(host.room.code, guest.token, {
-    action: 'animal',
-    animal: SAMPLE_ANIMALS[2],
-  });
-  assert.equal(
-    changed.room.players.find((player) => player.id === guest.playerId).ready,
-    false,
-  );
-  await assert.rejects(
-    store.act(host.room.code, host.token, { action: 'start' }),
-    isStatus(409),
-  );
-});
-
-test('race start snapshots server-derived results and remains immutable across leave and reconnect', async () => {
-  const { store } = setup();
-  const [host, guest] = await readyRoom(store);
-  const started = await store.act(host.room.code, host.token, {
-    action: 'start',
-    seed: 'cheat',
-    results: [{ playerId: host.playerId, rank: 1 }],
-  });
-  assert.equal(started.room.phase, 'racing');
-  const race = started.room.race;
-  assert.equal(race.startedAt, started.serverNow + 4000);
-  assert.notEqual(race.seed, 'cheat');
-  const expected = generateRace(race.players, race.seed);
-  assert.deepEqual(
-    race.results,
-    expected.results.map((result) => ({
-      playerId: result.id,
-      finishTimeMs: Math.round(result.time * 1000),
-      rank: result.place,
-      collisions: result.collisions,
-      jumps: result.jumps,
-    })),
-  );
-  await assert.rejects(
-    store.join({ code: host.room.code, ...profile(2) }),
-    isStatus(409),
-  );
-  await assert.rejects(
-    store.act(host.room.code, guest.token, {
-      action: 'animal',
-      animal: SAMPLE_ANIMALS[2],
-    }),
-    isStatus(409),
-  );
-  await assert.rejects(
-    store.act(host.room.code, host.token, { action: 'rematch' }),
-    isStatus(409),
-  );
-  const rejoined = await store.join({ code: host.room.code }, guest.token);
-  assert.equal(rejoined.playerId, guest.playerId);
-  assert.equal(rejoined.room.players.length, 2);
-  assert.deepEqual(rejoined.room.race, race);
-  const departed = await store.act(host.room.code, host.token, {
-    action: 'leave',
-  });
-  assert.equal(departed.room.hostId, guest.playerId);
-  assert.equal(departed.room.players.length, 1);
-  assert.deepEqual(departed.room.race, race);
-  assert.deepEqual(
-    (await store.get(host.room.code, guest.token)).room.race,
-    race,
-  );
-});
-
-test('simultaneous start and edit serialize without overwriting a running race', async () => {
-  const { store } = setup();
-  const [host, guest] = await readyRoom(store);
-  const result = await Promise.allSettled([
-    store.act(host.room.code, host.token, { action: 'start' }),
-    store.act(host.room.code, guest.token, {
-      action: 'animal',
-      animal: SAMPLE_ANIMALS[2],
-    }),
-  ]);
-  assert.equal(
-    result.filter((value) => value.status === 'fulfilled').length,
-    1,
-  );
-  const { room } = await store.get(host.room.code, host.token);
-  if (room.phase === 'racing')
-    assert.deepEqual(
-      room.race.players[1].animal,
-      sanitizeAnimal(SAMPLE_ANIMALS[1]),
-    );
-  else
+  assert.equal(joins.filter((r) => r.status === 200).length, 3);
+  assert.equal(joins.filter((r) => r.status === 409).length, 6);
+  const sessions = [
+    host,
+    ...joins.filter((r) => r.status === 200).map((r) => r.data),
+  ];
+  for (const session of sessions.slice(1)) clients.push(await connect(session));
+  assert.equal((await clients[1].act({ action: "start" })).status, 403);
+  for (const client of clients)
     assert.equal(
-      room.players.find((player) => player.id === guest.playerId).ready,
-      false,
+      (await client.act({ action: "ready", ready: true })).type,
+      "result",
     );
-});
-
-test('race finish uses server time and only host can open a rematch with readiness cleared', async () => {
-  const { store, advance } = setup();
-  const [host, guest] = await readyRoom(store);
-  const { room, serverNow } = await store.act(host.room.code, host.token, {
-    action: 'start',
-  });
-  // Keep both players connected, independent of the randomized race duration.
-  // Host transfer after missed heartbeats is exercised in the following test.
-  let remaining = room.race.startedAt + room.race.durationMs - serverNow - 1;
-  while (remaining > 0) {
-    const step = Math.min(10_000, remaining);
-    advance(step);
-    remaining -= step;
-    await store.get(host.room.code, host.token);
-    await store.get(host.room.code, guest.token);
+  const start = await clients[0].act({ action: "start" });
+  assert.equal(start.type, "result");
+  for (const client of clients) {
+    const pushed = await client.next(
+      (m) => m.type === "state" && m.room.phase === "racing",
+    );
+    assert.deepEqual(pushed.room.race, start.room.race);
+    assert.ok(!JSON.stringify(pushed).includes("tokenHash"));
   }
-  assert.equal((await store.get(host.room.code, host.token)).room.phase, 'racing');
-  await assert.rejects(
-    store.act(host.room.code, host.token, { action: 'rematch' }),
-    isStatus(409),
+  const reconnect = await connect(sessions[1]);
+  const snapshot = (
+    await request(`/api/rooms/${code}`, undefined, sessions[1].token)
+  ).data;
+  assert.equal(snapshot.room.players.length, 4);
+  assert.equal(snapshot.room.race.seed, start.room.race.seed);
+  await inspect(code, "/__finish");
+  await reconnect.next(
+    (m) => m.type === "state" && m.room.phase === "finished",
   );
-  advance(1);
-  const finished = await store.get(host.room.code, guest.token);
-  assert.equal(finished.room.phase, 'finished');
-  assert.equal(finished.room.hostId, host.playerId);
-  await assert.rejects(
-    store.act(host.room.code, guest.token, { action: 'rematch' }),
-    isStatus(403),
-  );
-  const rematch = await store.act(host.room.code, host.token, {
-    action: 'rematch',
-  });
-  assert.equal(rematch.room.phase, 'lobby');
-  assert.equal(rematch.room.race, null);
-  assert.ok(rematch.room.players.every((player) => !player.ready));
-  assert.ok(rematch.room.players.every((player) => player.animal));
-});
-
-test('heartbeat restores sessions at capacity, transfers stale host, and removes absent lobby members', async () => {
-  const { store, advance } = setup();
-  const sessions = await readyRoom(store, 4);
-  const restored = await store.join(
-    { code: sessions[0].room.code },
-    sessions[3].token,
-  );
-  assert.equal(restored.room.players.length, 4);
-  assert.equal(restored.playerId, sessions[3].playerId);
-  advance(21_000);
-  const guest = sessions[1];
-  const heartbeat = await store.get(guest.room.code, guest.token);
-  assert.equal(heartbeat.room.hostId, guest.playerId);
   assert.equal(
-    heartbeat.room.players.find((player) => player.id === sessions[0].playerId)
-      .connected,
-    false,
+    (await clients[0].act({ action: "rematch" })).room.phase,
+    "lobby",
   );
-  advance(40_000);
-  const cleaned = await store.get(guest.room.code, guest.token);
-  assert.equal(cleaned.room.players.length, 1);
-  assert.equal(cleaned.room.players[0].id, guest.playerId);
-  await assert.rejects(
-    store.get(guest.room.code, sessions[0].token),
-    isStatus(401),
-  );
+  for (const client of clients) client.ws.close();
+  reconnect.ws.close();
 });
 
-test('leaving last player deletes room and idle rooms expire', async () => {
-  const { store, advance } = setup();
-  const host = await store.create(profile());
-  await store.act(host.room.code, host.token, { action: 'leave' });
-  await assert.rejects(store.get(host.room.code, host.token), isStatus(404));
-  const idle = await store.create(profile());
-  advance(2 * 60 * 60 * 1000 + 1);
-  await assert.rejects(store.get(idle.room.code, idle.token), isStatus(404));
-  await store.create(profile());
-  const old = await db
-    .prepare('SELECT code FROM race_rooms WHERE code = ?')
-    .bind(idle.room.code)
-    .first();
-  assert.equal(old, null);
-});
-
-test('animal validation rejects nonfinite/out-of-bounds shapes, script colors and excessive payloads', () => {
-  for (const animal of SAMPLE_ANIMALS) assert.ok(sanitizeAnimal(animal));
-  const invalid = (modify) => {
-    const animal = structuredClone(SAMPLE_ANIMALS[0]);
-    modify(animal);
-    return animal;
-  };
-  assert.throws(
-    () =>
-      sanitizeAnimal(
-        invalid((animal) => {
-          animal.strokes[0].points[0].x = Infinity;
-        }),
-      ),
-    isStatus(400),
-  );
-  assert.throws(
-    () =>
-      sanitizeAnimal(
-        invalid((animal) => {
-          animal.strokes[0].points[0].y = 441;
-        }),
-      ),
-    isStatus(400),
-  );
-  assert.throws(
-    () =>
-      sanitizeAnimal(
-        invalid((animal) => {
-          animal.strokes[0].color = 'url(javascript:bad)';
-        }),
-      ),
-    isStatus(400),
-  );
-  assert.throws(
-    () =>
-      sanitizeAnimal(
-        invalid((animal) => {
-          animal.strokes = Array(81).fill(animal.strokes[0]);
-        }),
-      ),
-    isStatus(400),
-  );
-  assert.throws(
-    () => sanitizeAnimal({ name: '빈 그림', strokes: [] }),
-    isStatus(400),
-  );
-  assert.throws(
-    () =>
-      sanitizeAnimal({
-        name: '점',
-        strokes: [
-          {
-            color: '#123456',
-            points: [
-              { x: 3, y: 3 },
-              { x: 3, y: 3 },
-            ],
-          },
-        ],
-      }),
-    isStatus(400),
-  );
-});
-
-test('production HTTP routes create, join, authenticate polls and return non-cacheable JSON', async () => {
-  const post = (path, body, token) =>
-    new Request(`https://race.example${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(body),
-    });
-  const response = await createRoute.POST(post('/api/rooms', profile()));
-  assert.equal(response.status, 201);
-  assert.equal(response.headers.get('cache-control'), 'no-store');
-  const host = await response.json();
-  const joined = await joinRoute.POST(
-    post('/api/rooms/join', {
-      code: host.room.code.toLowerCase(),
-      ...profile(1),
-    }),
-  );
-  assert.equal(joined.status, 200);
-  const guest = await joined.json();
-  assert.equal(guest.room.players.length, 2);
-  const path = `/api/rooms/${host.room.code}`;
-  const context = { params: Promise.resolve({ code: host.room.code }) };
+test("idle snapshots, clock sync and hibernation heartbeats do not write room data", async () => {
+  const host = (await request("/api/rooms", profile())).data;
+  const client = await connect(host);
+  const before = await inspect(host.room.code);
+  for (let i = 0; i < 8; i++) {
+    client.ws.send("ping");
+    assert.equal(await client.next((m) => m === "pong"), "pong");
+    client.ws.send(JSON.stringify({ type: "sync", sentAt: 123 }));
+    assert.equal((await client.next((m) => m.type === "sync")).sentAt, 123);
+    assert.equal(
+      (await request(`/api/rooms/${host.room.code}`, undefined, host.token))
+        .data.revision,
+      before.revision,
+    );
+  }
+  assert.deepEqual(await inspect(host.room.code), before);
+  assert.equal((await client.act({ action: "leave" })).left, true);
   assert.equal(
-    (await roomRoute.GET(new Request(`https://race.example${path}`), context))
+    (await request(`/api/rooms/${host.room.code}`, undefined, host.token))
       .status,
-    401,
-  );
-  const polled = await roomRoute.GET(
-    new Request(`https://race.example${path}`, {
-      headers: { Authorization: `Bearer ${guest.token}` },
-    }),
-    context,
-  );
-  assert.equal(polled.status, 200);
-  const action = await roomRoute.POST(
-    post(path, { action: 'ready', ready: true }, guest.token),
-    context,
-  );
-  assert.equal(action.status, 200);
-  assert.equal(
-    (await action.json()).room.players.find(
-      (player) => player.id === guest.playerId,
-    ).ready,
-    true,
+    404,
   );
 });
 
-test('HTTP parser rejects oversized, malformed, non-JSON, and cross-origin requests', async () => {
-  const request = (body, headers = { 'Content-Type': 'application/json' }) =>
-    new Request('https://race.example/api/rooms', {
-      method: 'POST',
-      headers,
-      body,
-    });
-  assert.equal(
-    (await createRoute.POST(request('x'.repeat(180_001)))).status,
-    413,
-  );
-  assert.equal((await createRoute.POST(request('{broken'))).status, 400);
-  assert.equal(
-    (await createRoute.POST(request('{}', { 'Content-Type': 'text/plain' })))
-      .status,
-    415,
-  );
+test("HTTP and WebSocket reject cross-origin, malformed, oversized and foreign credentials", async () => {
   assert.equal(
     (
-      await createRoute.POST(
-        request('{}', {
-          'Content-Type': 'application/json',
-          Origin: 'https://unrelated.example',
-        }),
-      )
+      await request("/api/rooms", profile(), undefined, {
+        Origin: "https://evil.example",
+      })
     ).status,
     403,
   );
-  const invalid = await createRoute.POST(request('{}'));
-  assert.equal(invalid.status, 400);
-  assert.equal(typeof (await invalid.json()).error, 'string');
+  assert.equal((await request("/api/rooms", {})).status, 400);
+  const host = (await request("/api/rooms", profile())).data;
+  assert.equal((await request(`/api/rooms/${host.room.code}`)).status, 401);
+  assert.equal(
+    (await request(`/api/rooms/${host.room.code}`, undefined, "a".repeat(48)))
+      .status,
+    401,
+  );
+  for (const [origin, token, expected] of [
+    ["https://evil.example", host.token, 403],
+    ["https://race.example", "a".repeat(48), 401],
+  ]) {
+    const response = await mf.dispatchFetch(
+      `https://race.example/api/rooms/${host.room.code}/socket`,
+      {
+        headers: {
+          Upgrade: "websocket",
+          Origin: origin,
+          "Sec-WebSocket-Protocol": `draw-derby.v1, token.${token}`,
+        },
+      },
+    );
+    assert.equal(response.status, expected);
+  }
+  const client = await connect(host);
+  client.ws.send("{bad");
+  assert.equal((await client.next((m) => m.type === "error")).status, 400);
+  client.ws.send("x".repeat(180001));
+  assert.equal((await client.next((m) => m.type === "error")).status, 413);
+  assert.equal(
+    (await client.act({ action: "ready", ready: true })).type,
+    "result",
+  );
+  client.ws.close();
+});
+
+test("persisted room and credentials survive a Worker restart", async () => {
+  const host = (await request("/api/rooms", profile())).data;
+  const client = await connect(host);
+  await client.act({ action: "ready", ready: true });
+  client.ws.close();
+  await mf.dispose();
+  mf = new Miniflare(options);
+  await mf.ready;
+  const reconnected = await connect(host);
+  const snapshot = (
+    await request(`/api/rooms/${host.room.code}`, undefined, host.token)
+  ).data;
+  assert.equal(snapshot.room.players[0].id, host.playerId);
+  assert.equal(snapshot.room.players[0].ready, true);
+  reconnected.ws.close();
 });

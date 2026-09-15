@@ -3,6 +3,21 @@ import test from "node:test";
 import { TRACKS } from "../lib/game.ts";
 import { createRaceCamera, RACE_VIEW } from "../lib/race-camera.ts";
 
+test("two to eight lanes stay inside the road and landscape reveals more track without shrinking distances", () => {
+  for (let count = 2; count <= 8; count++) {
+    for (const track of TRACKS) {
+      const camera = createRaceCamera(track.id, 400, 1000, count);
+      const lanes = Array.from({ length: count }, (_, lane) => camera.surface(400, lane));
+      assert.ok(lanes.every(p => p.y > 130 && p.y < 550));
+      assert.ok(lanes.every((p, i) => i === 0 || p.y > lanes[i - 1].y));
+      assert.equal(camera.laneLines.length, count + 1);
+      const wide = createRaceCamera(track.id, 400, 1000, count, 1900);
+      assert.ok(wide.to > camera.to + 200);
+      assert.deepEqual(wide.surface(430, count - 1), camera.surface(430, count - 1));
+    }
+  }
+});
+
 const close = (actual: number, expected: number, tolerance = 0.00001) =>
   assert.ok(
     Math.abs(actual - expected) < tolerance,

@@ -15,9 +15,11 @@ import {
   type Stroke,
   type TrackId,
 } from "@/lib/game";
-import type { Room, RoomAction, RoomResponse, RoomSession } from "@/lib/rooms";
+import { ROOM_DEFAULT_CAPACITY, type Room, type RoomAction, type RoomResponse, type RoomSession } from "@/lib/rooms";
 import RaceCanvas from "@/components/RaceCanvas";
 import TrackPicker from "@/components/TrackPicker";
+import RoomCapacity from "@/components/RoomCapacity";
+import { RoomConnection } from "@/lib/room-connection";
 import { RaceAudio } from "@/lib/race-audio";
 
 const COLORS = ["#272c21", "#ed653b", "#4264e9", "#ac3a8c"];
@@ -286,6 +288,7 @@ export default function Home({
   onPlayOnline?: () => void;
 } = {}) {
   const [trackId, setTrackId] = useState<TrackId>(DEFAULT_TRACK);
+  const [capacity, setCapacity] = useState(ROOM_DEFAULT_CAPACITY);
   const [stage, setStage] = useState<Stage>("draw"),
     [strokes, setStrokes] = useState<Stroke[]>(SAMPLE_ANIMALS[0].strokes),
     [name, setName] = useState("아무튼 말"),
@@ -303,6 +306,7 @@ export default function Home({
     [startedAt, setStartedAt] = useState(0),
     [elapsed, setElapsed] = useState(-3),
     [isMultiplayerRace, setIsMultiplayerRace] = useState(false);
+  const connection = useRef<RoomConnection | null>(null);
   const serverOffset = useRef(0),
     activeSeed = useRef(""),
     raceAudio = useRef<RaceAudio | null>(null),
@@ -474,14 +478,14 @@ export default function Home({
     const t = setTimeout(() => setNotice(""), 3500);
     return () => clearTimeout(t);
   }, [notice]);
-  const applyRoom = useCallback((data: RoomResponse, sentAt: number) => {
+  const applyRoom = useCallback((data: RoomResponse, sentAt?: number) => {
     if (
       roomRevision.current.code === data.room.code &&
       data.revision < roomRevision.current.revision
     )
       return;
     roomRevision.current = { code: data.room.code, revision: data.revision };
-    serverOffset.current = data.serverNow - (sentAt + Date.now()) / 2;
+    if (sentAt !== undefined) serverOffset.current = data.serverNow - (sentAt + Date.now()) / 2;
     setError((previous) =>
       previous.startsWith("연결이 잠시 끊겼어요.") ? "" : previous,
     );
@@ -524,6 +528,8 @@ export default function Home({
     }
   }
   function forget() {
+    connection.current?.stop();
+    connection.current = null;
     setSession(null);
     setRoom(null);
     activeSeed.current = "";
@@ -535,44 +541,24 @@ export default function Home({
   }
   useEffect(() => {
     if (!session) return;
-    let cancelled = false,
-      timeout: ReturnType<typeof setTimeout>;
-    const controller = new AbortController();
-    async function poll() {
-      const sentAt = Date.now();
-      try {
-        const response = await fetch(`/api/rooms/${session!.code}`, {
-          headers: { Authorization: `Bearer ${session!.token}` },
-          signal: controller.signal,
-          cache: "no-store",
-        });
-        const data = (await response.json()) as RoomResponse & {
-          error?: string;
-        };
-        if (cancelled) return;
-        if (!response.ok) {
-          if ([401, 403, 404, 410].includes(response.status)) {
-            forget();
-            setStage("draw");
-            setError(
-              data.error || "대기방이 만료되었어요. 새 방을 만들어 주세요.",
-            );
-            return;
-          }
-          throw new Error(data.error);
-        }
-        applyRoom(data, sentAt);
-      } catch (e) {
-        if (!cancelled && !(e instanceof Error && e.name === "AbortError"))
-          setError("연결이 잠시 끊겼어요. 자동으로 다시 연결하고 있어요.");
-      }
-      if (!cancelled) timeout = setTimeout(poll, 1500);
-    }
-    void poll();
+    const transport = new RoomConnection(session, {
+      state: data => applyRoom(data),
+      clock: offset => { serverOffset.current = offset; },
+      status: connected => setError(previous => connected
+        ? (previous.startsWith("연결이 잠시 끊겼어요.") ? "" : previous)
+        : "연결이 잠시 끊겼어요. 자동으로 다시 연결하고 있어요."),
+      ended: message => { forget(); setStage("draw"); setError(message); },
+    });
+    connection.current = transport;
+    transport.start();
+    const resume = () => { if (!document.hidden) transport.resume(); };
+    document.addEventListener("visibilitychange", resume);
+    document.addEventListener("draw-derby-visibility", resume);
     return () => {
-      cancelled = true;
-      controller.abort();
-      clearTimeout(timeout);
+      document.removeEventListener("visibilitychange", resume);
+      document.removeEventListener("draw-derby-visibility", resume);
+      transport.stop();
+      if (connection.current === transport) connection.current = null;
     };
   }, [session, applyRoom]);
   useEffect(() => {
@@ -623,7 +609,7 @@ export default function Home({
         body: JSON.stringify({
           name: animal.name,
           animal,
-          ...(!join ? { trackId } : {}),
+          ...(!join ? { trackId, capacity } : {}),
           ...(join ? { code: joinCode } : {}),
         }),
       });
@@ -647,22 +633,14 @@ export default function Home({
     beep();
     const sentAt = Date.now();
     try {
-      const response = await fetch(`/api/rooms/${session.code}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.token}`,
-        },
-        body: JSON.stringify(action),
-      });
-      const data = (await response.json()) as RoomResponse & { error?: string };
-      if (!response.ok) throw new Error(data.error || "다시 시도해 주세요.");
+      if (!connection.current) throw new Error("서버에 연결하고 있어요. 잠시 후 시도해 주세요.");
+      const data = await connection.current.action(action);
       if (action.action === "leave") {
         forget();
         setStage("draw");
         setRace(null);
       } else {
-        applyRoom(data, sentAt);
+        if ("room" in data) applyRoom(data, sentAt);
         if (action.action === "animal") setStage("lobby");
       }
     } catch (e) {
@@ -907,7 +885,7 @@ export default function Home({
                   onClick={() => offline ? onPlayOnline?.() : setMode("friends")}
                   disabled={!!session}
                 >
-                  친구와 경주 <small>최대 4인</small>
+                  친구와 경주 <small>최대 8인</small>
                 </button>
               </div>
             </div>
@@ -932,6 +910,9 @@ export default function Home({
               <span>→</span>
             </button>
           </section>
+          {mode === "friends" && !session && (
+            <RoomCapacity value={capacity} onChange={setCapacity} disabled={busy} />
+          )}
           {mode === "friends" && !session && (
             <form
               className="join-panel"
@@ -1034,8 +1015,15 @@ export default function Home({
             disabled={busy || !isHost}
             lobby
           />
+          <RoomCapacity
+            value={room?.capacity ?? ROOM_DEFAULT_CAPACITY}
+            occupied={room?.players.length}
+            disabled={busy || !isHost}
+            hostOnly={!isHost}
+            onChange={(value) => void roomAction({ action: "capacity", capacity: value })}
+          />
           <div className="lobby-grid">
-            {Array.from({ length: 4 }, (_, i) => {
+            {Array.from({ length: room?.capacity ?? ROOM_DEFAULT_CAPACITY }, (_, i) => {
               const p = room?.players[i];
               return (
                 <article
@@ -1094,7 +1082,7 @@ export default function Home({
             <div className="lobby-helper">
               <span className="live-dot" />
               <p>
-                <b>{room?.players.length || 0}/4명 입장</b>
+                <b>{room?.players.length || 0}/{room?.capacity ?? ROOM_DEFAULT_CAPACITY}명 입장</b>
                 <span>최소 2명부터 출발할 수 있어요.</span>
               </p>
             </div>
