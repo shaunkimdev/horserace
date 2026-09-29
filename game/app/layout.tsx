@@ -10,13 +10,13 @@ export async function generateMetadata(): Promise<Metadata> {
   const origin = `${protocol}://${host}`;
   return {
     metadataBase: new URL(origin),
-    title: "DRAW DERBY — 그려요. 달려요.",
+    title: "드로우 더비 — 나만의 낙서 운동장",
     description:
-      "당신의 낙서가 선수가 됩니다. 직접 그린 동물로 최대 8명이 함께 달리는 장애물 경주. 그림 실력은 선택, 다리는 필수!",
+      "직접 그린 러너로 떠나는 한 바퀴. 네 가지 트랙에서 혼자 연습하거나 최대 8명의 친구와 함께 달려보세요.",
     openGraph: {
-      title: "DRAW DERBY — 그려요. 달려요.",
+      title: "드로우 더비 — 나만의 낙서 운동장",
       description:
-        "DRAW A LITTLE. RACE A LOT. 친구와 함께 달리는 손그림 동물 레이싱.",
+        "내가 그린 모습으로 달려요. 친구와 함께하는 낙서 운동장.",
       locale: "ko_KR",
       type: "website",
       images: [{ url: `${origin}/og.png`, width: 1732, height: 908 }],
@@ -24,7 +24,7 @@ export async function generateMetadata(): Promise<Metadata> {
     twitter: {
       card: "summary_large_image",
       title: "DRAW DERBY",
-      description: "당신의 낙서가 선수가 됩니다. 최대 8인 동물 레이싱.",
+      description: "직접 만든 러너, 네 가지 트랙, 최대 8명의 친구. 나만의 낙서 운동장.",
       images: [`${origin}/og.png`],
     },
   };

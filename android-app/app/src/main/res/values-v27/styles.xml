@@ -1,6 +1,6 @@
 <resources>
     <style name="Theme.DrawDerby" parent="Base.Theme.DrawDerby">
         <item name="android:windowLightNavigationBar">true</item>
-        <item name="android:navigationBarColor">#d5f444</item>
+        <item name="android:navigationBarColor">#ffffff</item>
     </style>
 </resources>

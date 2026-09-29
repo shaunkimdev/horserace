@@ -36,7 +36,7 @@ for (const [trackIndex, track] of TRACKS.entries())
     const home = await fetch(base);
     assert.equal(home.status, 200);
     const html = await home.text();
-    assert.match(html, /DRAW YOUR ATHLETE/);
+    assert.match(html, /aria-label="동물 그리기 캔버스/);
     assert.doesNotMatch(html, /codex-preview/);
     const sessions = [],
       clients = [];

@@ -1,6 +1,6 @@
 import type { Animal, Participant, TrackId } from './game';
 
-export const ROOM_COLORS = ['#e9585e', '#4381dc', '#e6b43d', '#7b64c4', '#178675', '#dc772e', '#ba4f91', '#52763a'] as const;
+export const ROOM_COLORS = ['#16915b', '#3474e6', '#1195a3', '#22352b', '#7055b4', '#c78a25', '#b74d78', '#568b32'] as const;
 export const ROOM_DEFAULT_CAPACITY = 4;
 export const ROOM_MIN_CAPACITY = 2;
 export const ROOM_MAX_CAPACITY = 8;

@@ -10,8 +10,8 @@ android {
         applicationId = 'com.drawderby.app'
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = '1.2.1'
+        versionCode = 6
+        versionName = '1.4.0'
         testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
     }
     buildFeatures {
@@ -43,9 +43,12 @@ def bundleGame = tasks.register('bundleGame', Exec) {
     commandLine 'node', 'scripts/build-web.mjs'
     inputs.files(fileTree('../web'), fileTree('../scripts') { include '*.mjs' })
     inputs.files(fileTree('../../game/app') { include '*.tsx', '*.css' })
+    inputs.files(fileTree('../../game/app/fonts'))
     inputs.files(fileTree('../../game/components') { include '**/*.tsx', '**/*.ts' })
     inputs.files(fileTree('../../game/lib') { include '*.ts' })
+    inputs.file('../../game/lib/client-notices.json')
     inputs.file('../../game/package-lock.json')
+    inputs.file('../../game/public/studio-buddy.png')
     outputs.dir('src/main/assets/game')
 }
 tasks.named('preBuild').configure { dependsOn bundleGame }

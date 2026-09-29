@@ -17,6 +17,7 @@ type AnimalOptions = {
   ducking?: boolean;
   tilt?: number;
   lineWidth?: number;
+  depth?: number;
 };
 
 /** Keep the user's outline, with a gallop driven by distance and articulated lower legs. */
@@ -62,9 +63,8 @@ export function drawAnimal(
   ctx.lineJoin = "round";
   for (const stroke of strokes) {
     if (stroke.points.length < 2) continue;
-    ctx.strokeStyle = options.color ?? stroke.color ?? "#28372d";
-    ctx.beginPath();
-    stroke.points.forEach((point, index) => {
+    const color = options.color ?? stroke.color ?? "#22352b";
+    const points = stroke.points.map((point) => {
       let px = (point.x - left) * scale - drawnWidth / 2;
       let py = (point.y - top) * scale - drawnHeight;
       const foot = Math.max(
@@ -91,16 +91,54 @@ export function drawAnimal(
           0.19 *
           effort;
       }
-      if (index === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
+      return { x: px, y: py };
     });
+    const trace = (dx = 0, dy = 0) => {
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        if (index) ctx.lineTo(point.x + dx, point.y + dy);
+        else ctx.moveTo(point.x + dx, point.y + dy);
+      });
+    };
+    const depth = options.depth ?? 0;
+    if (depth > 0) {
+      // A shaded side behind the user's exact outline gives the line a solid edge.
+      trace(-depth * 0.7, depth);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = (options.lineWidth ?? 3.8) + 1;
+      ctx.stroke();
+      ctx.save();
+      ctx.strokeStyle = "#123527";
+      ctx.globalAlpha *= 0.32;
+      ctx.stroke();
+      ctx.restore();
+      trace();
+      const first = points[0], last = points[points.length - 1];
+      if (points.length > 2 && Math.hypot(first.x - last.x, first.y - last.y) < 3) {
+        ctx.fillStyle = "#fcfefb";
+        ctx.fill();
+      }
+    }
+    trace();
+    ctx.lineWidth = options.lineWidth ?? 3.8;
+    ctx.strokeStyle = color;
     ctx.stroke();
+    if (depth > 0) {
+      trace(0.3, -0.6);
+      ctx.save();
+      ctx.globalAlpha *= 0.36;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
   }
   ctx.restore();
 }
 
 const HEIGHT = RACE_VIEW.height;
-const INK = "#29352d";
+const INK = "#182b26";
+const FONT = '"Pretendard", "Noto Sans KR", sans-serif';
 function ellipse(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -179,7 +217,7 @@ export default function RaceCanvas({
     const media = window.matchMedia("(orientation: landscape) and (max-height: 600px)");
     const resize = () => setWidth(media.matches && wrap.clientHeight
       ? Math.max(RACE_VIEW.width, Math.min(2800, Math.round(HEIGHT * wrap.clientWidth / wrap.clientHeight)))
-      : RACE_VIEW.width);
+      : wrap.clientWidth <= 680 ? 840 : RACE_VIEW.width);
     const observer = new ResizeObserver(resize);
     observer.observe(wrap);
     media.addEventListener("change", resize);
@@ -201,7 +239,7 @@ export default function RaceCanvas({
     ).matches;
     const running = elapsed > 0;
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
-    ctx.fillStyle = "#e5eed3";
+    ctx.fillStyle = "#e7f3e5";
     ctx.fillRect(0, 0, WIDTH, HEIGHT);
     ctx.save();
     if (!reducedMotion && running && player.status === "stumbling")
@@ -233,7 +271,7 @@ export default function RaceCanvas({
         -0.18,
         Math.min(
           0.18,
-          (Math.atan2(ahead.y - y, Math.abs(ahead.x - x)) + Math.atan(0.1)) *
+          (Math.atan2(ahead.y - y, Math.abs(ahead.x - x)) + Math.atan(RACE_VIEW.groundSlope)) *
             0.16,
         ),
       );
@@ -244,18 +282,29 @@ export default function RaceCanvas({
       ctx.translate(-x, -y);
       const color = participant.color || INK;
       const jumping = racer.y > 5;
+      // Project the actual animated drawing onto the ground, then add a contact shadow.
+      ctx.save();
+      ctx.translate(x + 14 + racer.y * 0.24, y + 5);
+      ctx.transform(1, -0.05, -0.5, 0.16, 0, 0);
+      ctx.globalAlpha = Math.max(0.06, 0.16 - racer.y * 0.001);
+      drawAnimal(ctx, participant.animal.strokes,
+        -RACE_VIEW.animalWidth / 2, -RACE_VIEW.animalHeight,
+        RACE_VIEW.animalWidth, RACE_VIEW.animalHeight,
+        { color: "#42694e", stride: racer.stride, moving: running && !racer.finished,
+          speed: racer.speed, airborne: racer.y, facing, lineWidth: 8 });
+      ctx.restore();
       ellipse(
         ctx,
         x,
         y + 4,
-        Math.max(30, 64 - racer.y * 0.35),
+        Math.max(36, 84 - racer.y * 0.35),
         7 - Math.min(3, racer.y * 0.045),
-        "#d7deca",
+        "#557b5422",
       );
       if (isPlayer) {
         ctx.save();
         ctx.globalAlpha = 0.75;
-        line(ctx, x - 66, y + 14, x + 68, y + 1, "#c4e837", 4);
+        line(ctx, x - 86, y + 18, x + 88, y - 13, "#16915b", 4);
         ctx.restore();
       }
       if (running && racer.speed > 0 && !racer.finished && !reducedMotion) {
@@ -285,7 +334,7 @@ export default function RaceCanvas({
             y + 2 - phase * (14 + (i % 3) * 7),
             2 + phase * 9,
             1 + phase * 5,
-            racer.status === "slowed" ? "#9a876e" : "#b8c6a5",
+            racer.status === "slowed" ? "#9a876e" : "#b7c9d9",
           );
           ctx.restore();
         }
@@ -293,7 +342,7 @@ export default function RaceCanvas({
       if (racer.landing > 0 && !reducedMotion) {
         ctx.save();
         ctx.globalAlpha = racer.landing * 0.65;
-        ctx.strokeStyle = "#9eae83";
+        ctx.strokeStyle = "#8cacc7";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.ellipse(
@@ -326,18 +375,19 @@ export default function RaceCanvas({
           ducking: racer.status === "ducking",
           facing,
           tilt: racer.tilt + cornerLean,
-          lineWidth: isPlayer ? 4 : 3.5,
+          lineWidth: isPlayer ? 5.2 : 4.6,
+          depth: 3.2,
         },
       );
       const label = `${isPlayer ? "나 · " : ""}${participant.name}`;
-      ctx.font = '700 13px Arial, "Noto Sans KR", sans-serif';
+      ctx.font = `700 14px ${FONT}`;
       const labelWidth = Math.min(172, ctx.measureText(label).width + 21);
-      const labelY = y - 119 - racer.y - racer.bob;
-      ctx.fillStyle = isPlayer ? INK : "#fbfcf4e8";
+      const labelY = y - RACE_VIEW.animalHeight - 18 - racer.y - racer.bob;
+      ctx.fillStyle = isPlayer ? "#147d54" : "#fffffff0";
       ctx.beginPath();
-      ctx.roundRect(x - labelWidth / 2, labelY - 17, labelWidth, 25, 5);
+      ctx.roundRect(x - labelWidth / 2, labelY - 17, labelWidth, 26, 13);
       ctx.fill();
-      ctx.fillStyle = isPlayer ? "#d8f34d" : color;
+      ctx.fillStyle = isPlayer ? "#ffffff" : color;
       ctx.textAlign = "center";
       ctx.fillText(label, x, labelY, labelWidth - 14);
       if (racer.status !== "running" && !racer.finished) {
@@ -350,15 +400,15 @@ export default function RaceCanvas({
           sliding: "급회전에 미끄러져요!",
           finished: "",
         }[racer.status];
-        ctx.font = '700 12px Arial, "Noto Sans KR", sans-serif';
-        ctx.fillStyle = racer.status === "stumbling" ? "#d77843" : "#728759";
+        ctx.font = `700 13px ${FONT}`;
+        ctx.fillStyle = racer.status === "stumbling" ? "#d77843" : "#537d87";
         ctx.fillText(status ?? "", x, labelY - 28);
       }
       if (racer.status === "stumbling")
         collisionBurst(ctx, x + 76, y - 49, t, "#ed9b55");
       if (racer.finished) {
         ctx.fillStyle = INK;
-        ctx.font = "900 18px Arial, sans-serif";
+        ctx.font = `850 18px ${FONT}`;
         ctx.fillText(`${racer.place}위`, x + 99, y - 44);
       }
       ctx.restore();
@@ -374,25 +424,25 @@ export default function RaceCanvas({
         ctx.save();
         ctx.globalAlpha =
           Math.sin(phase * Math.PI) * (player.x > 800 ? 0.32 : 0.16);
-        line(ctx, sx, sy, sx + 35 + player.speed * 0.8, sy - 7, "#5b7144", 2);
+        line(ctx, sx, sy, sx + 35 + player.speed * 0.8, sy - 7, "#5b7a94", 2);
         ctx.restore();
       }
     }
-    ctx.fillStyle = "#fbfcf4e8";
+    ctx.fillStyle = "#fffffff0";
     ctx.beginPath();
     ctx.roundRect(22, HEIGHT - 42, 149, 27, 5);
     ctx.fill();
-    ctx.fillStyle = "#6d7d5c";
-    ctx.font = "600 11px Arial, sans-serif";
+    ctx.fillStyle = "#5a7090";
+    ctx.font = `600 12px ${FONT}`;
     ctx.textAlign = "left";
     ctx.fillText(
       `${Math.min(race.distance, Math.floor(player.x))} / ${race.distance} m`,
       34,
       HEIGHT - 24,
     );
-    ctx.fillStyle = "#dde6cb";
+    ctx.fillStyle = "#dce5f4";
     ctx.fillRect(32, HEIGHT - 17, 128, 2);
-    ctx.fillStyle = "#92ad4b";
+    ctx.fillStyle = "#147d54";
     ctx.fillRect(32, HEIGHT - 17, (128 * player.x) / race.distance, 2);
 
     if (elapsed >= race.duration && completedRef.current !== race) {

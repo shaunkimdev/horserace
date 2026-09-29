@@ -55,8 +55,11 @@ import java.util.HashSet;
 public class MainActivity extends Activity {
     static final String OFFLINE_ORIGIN = "https://appassets.androidplatform.net";
     static final String OFFLINE_URL = OFFLINE_ORIGIN + "/assets/game/index.html";
-    private static final int LIME = Color.rgb(213, 244, 68);
-    private static final int INK = Color.rgb(39, 44, 33);
+    private static final int SURFACE = Color.WHITE;
+    private static final int INK = Color.rgb(24, 43, 38);
+    private static final int GREEN = Color.rgb(20, 125, 84);
+    private static final int BLUE = Color.rgb(40, 100, 223);
+    private Typeface appTypeface;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WebView webView;
     private WebViewAssetLoader assetLoader;
@@ -90,6 +93,7 @@ public class MainActivity extends Activity {
         assetLoader = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        appTypeface = Typeface.createFromAsset(getAssets(), "game/fonts/PretendardVariable.ttf");
         buildLayout();
         createWebView();
         loadPage(OFFLINE_URL, false);
@@ -105,7 +109,8 @@ public class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(label);
         button.setTextColor(INK);
-        button.setTextSize(12);
+        button.setTextSize(14);
+        button.setTypeface(appTypeface, Typeface.BOLD);
         button.setAllCaps(false);
         button.setMinHeight(dp(48));
         button.setMinimumWidth(0);
@@ -117,14 +122,14 @@ public class MainActivity extends Activity {
     private GradientDrawable background(int color) {
         GradientDrawable shape = new GradientDrawable();
         shape.setColor(color);
-        shape.setCornerRadius(dp(10));
+        shape.setCornerRadius(dp(28));
         return shape;
     }
 
     private void buildLayout() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(LIME);
+        root.setBackgroundColor(SURFACE);
         content = new FrameLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -141,7 +146,7 @@ public class MainActivity extends Activity {
         for (Button item : new Button[]{soloButton, friendsButton, settingsButton}) {
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1);
             params.setMargins(dp(3), 0, dp(3), 0);
-            item.setBackground(background(0x55ffffff));
+            item.setBackground(background(0xfff0f7f3));
             bar.addView(item, params);
         }
         root.addView(bar);
@@ -150,15 +155,16 @@ public class MainActivity extends Activity {
         errorPanel.setOrientation(LinearLayout.VERTICAL);
         errorPanel.setGravity(Gravity.CENTER);
         errorPanel.setPadding(dp(28), dp(28), dp(28), dp(28));
-        errorPanel.setBackgroundColor(LIME);
+        errorPanel.setBackgroundColor(SURFACE);
         TextView title = new TextView(this);
         title.setText("잠깐, 다시 출발할까요?");
         title.setTextColor(INK);
         title.setTextSize(24);
-        title.setTypeface(null, Typeface.BOLD);
+        title.setTypeface(appTypeface, Typeface.BOLD);
         errorPanel.addView(title);
         errorText = new TextView(this);
         errorText.setTextSize(15);
+        errorText.setTypeface(appTypeface);
         errorText.setTextColor(INK);
         errorText.setGravity(Gravity.CENTER);
         errorText.setPadding(0, dp(20), 0, dp(24));
@@ -190,7 +196,7 @@ public class MainActivity extends Activity {
     @SuppressLint("SetJavaScriptEnabled") // Only trusted main frames can request race-screen orientation.
     private void createWebView() {
         webView = new WebView(this);
-        webView.setBackgroundColor(LIME);
+        webView.setBackgroundColor(SURFACE);
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -227,10 +233,10 @@ public class MainActivity extends Activity {
         online = remote;
         pageFailed = false;
         errorPanel.setVisibility(View.GONE);
-        soloButton.setBackground(background(remote ? 0x55ffffff : INK));
-        soloButton.setTextColor(remote ? INK : LIME);
-        friendsButton.setBackground(background(remote ? INK : 0x55ffffff));
-        friendsButton.setTextColor(remote ? LIME : INK);
+        soloButton.setBackground(background(remote ? 0xffeff9f2 : GREEN));
+        soloButton.setTextColor(remote ? GREEN : SURFACE);
+        friendsButton.setBackground(background(remote ? BLUE : 0xffedf3ff));
+        friendsButton.setTextColor(remote ? SURFACE : BLUE);
         progress.setVisibility(View.VISIBLE);
         webView.loadUrl(url);
         if (remote) {
@@ -339,11 +345,13 @@ public class MainActivity extends Activity {
         fields.setOrientation(LinearLayout.VERTICAL);
         fields.setPadding(dp(24), dp(10), dp(24), 0);
         TextView note = new TextView(this);
+        note.setTypeface(appTypeface);
         note.setText("기본 서버가 설정되어 있어요. 연결한 뒤 방을 만들거나 6자리 방 코드로 참가하세요.\n친구들도 같은 서버에 접속하면 함께 달릴 수 있어요.");
         note.setTextColor(INK);
         note.setPadding(0, 0, 0, dp(16));
         fields.addView(note);
         EditText address = new EditText(this);
+        address.setTypeface(appTypeface);
         address.setSingleLine(true);
         address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         address.setHint(ServerAddress.DEFAULT_ORIGIN);
@@ -351,6 +359,7 @@ public class MainActivity extends Activity {
         address.setContentDescription("게임 서버 주소");
         fields.addView(address);
         TextView hint = new TextView(this);
+        hint.setTypeface(appTypeface);
         hint.setText("인터넷이 연결되어 있으면 서로 다른 장소에서도 함께 플레이할 수 있어요.\n직접 실행한 서버를 쓰려면 주소를 변경하세요.");
         hint.setTextSize(12);
         hint.setPadding(0, dp(12), 0, dp(4));

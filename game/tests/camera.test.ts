@@ -24,14 +24,14 @@ const close = (actual: number, expected: number, tolerance = 0.00001) =>
     `${actual} should be within ${tolerance} of ${expected}`,
   );
 
-test("all four tracks keep every player at the original straight-track camera anchor", () => {
+test("all four tracks keep the same oblique lane anchors and show the complete larger drawing", () => {
   for (const track of TRACKS) {
     for (let metres = 0; metres <= 1000; metres += 5) {
       const camera = createRaceCamera(track.id, metres);
       for (let lane = 0; lane < 4; lane++) {
         const player = camera.surface(metres, lane);
-        close(player.x, 260);
-        close(player.y, 215 + lane * 100 - 260 * 0.1);
+        close(player.x, 337 + lane * 42);
+        close(player.y, 215 + lane * 90);
         // Framing leaves the same room for the complete drawing on every lane.
         assert.ok(player.x - RACE_VIEW.animalWidth / 2 > 0);
         assert.ok(player.y - RACE_VIEW.animalHeight > 0);
@@ -41,16 +41,16 @@ test("all four tracks keep every player at the original straight-track camera an
   }
 });
 
-test("straight-course ground and obstacle surfaces preserve their original pixel projection", () => {
+test("straight-course ground and obstacles share the oblique projection at every distance", () => {
   for (const follow of [0, 275, 680, 1000]) {
     const camera = createRaceCamera("straight", follow);
     for (const metres of [-40, 0, 110, 500, 1000, 1050]) {
       for (let lane = 0; lane < 4; lane++) {
-        const x = (metres - follow) * 3.2 + 260;
+        const forward = (metres - follow) * 3.2;
         for (const across of [-45, 0, 7]) {
           const point = camera.surface(metres, lane, across);
-          close(point.x, x);
-          close(point.y, 215 + lane * 100 - x * 0.1 + across);
+          close(point.x, 337 + forward + lane * 42 + across * 0.42);
+          close(point.y, 215 + lane * 90 - forward * 0.18 + across * 0.9);
         }
       }
     }
@@ -89,7 +89,7 @@ test("upcoming bends stay gentle and the inside fences cannot fold back", () => 
       const camera = createRaceCamera(track.id, follow);
       const ahead = camera.project(follow + 70);
       const bend =
-        ahead.y - RACE_VIEW.centerY + (ahead.x - RACE_VIEW.anchorX) * 0.1;
+        (ahead.y - RACE_VIEW.centerY + (ahead.x - RACE_VIEW.anchorX) * 0.18) / 0.9756;
       assert.ok(
         Math.abs(bend) < (track.id === "oval" ? 32 : 60),
         `${track.id}: the next 70m bends by ${bend}px`,
@@ -133,7 +133,7 @@ test("the oval camera closes its lap seamlessly and curves remain visible in the
       const camera = createRaceCamera(track.id, metres),
         p = camera.project(metres + 70);
       if (
-        Math.abs(p.y - (RACE_VIEW.centerY - (p.x - RACE_VIEW.anchorX) * 0.1)) >
+        Math.abs((p.y - RACE_VIEW.centerY + (p.x - RACE_VIEW.anchorX) * 0.18) / 0.9756) >
         (track.id === "oval" ? 15 : 25)
       )
         bends++;

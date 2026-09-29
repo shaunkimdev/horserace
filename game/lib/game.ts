@@ -37,10 +37,10 @@ export type TrackDefinition = {
 };
 export const DEFAULT_TRACK: TrackId = 'straight';
 export const TRACKS: readonly TrackDefinition[] = [
-  { id:'straight', name:'쭉쭉 허들 직선', subtitle:'STRAIGHT · 보폭과 점프', description:'긴 직선 위로 허들과 물웅덩이가 이어지는 질주 코스.', advantage:'긴 다리 · 넓은 보폭', caution:'짧은 다리는 높은 허들에 주의', color:'#ec7d4f', closed:false },
-  { id:'oval', name:'빙글빙글 원형 경기장', subtitle:'OVAL · 코너와 균형', description:'크게 휘어진 원형 트랙을 한 바퀴. 코너에서도 속도를 지켜요.', advantage:'넓은 다리 간격 · 낮은 중심', caution:'키가 크고 불안정하면 바깥 펜스에 쿵', color:'#598cc9', closed:true },
-  { id:'zigzag', name:'갈팡질팡 지그재그', subtitle:'ZIGZAG · 연속 방향 전환', description:'왼쪽, 오른쪽! 넓은 호로 이어지는 코너 사이에 돌길이 나타나요.', advantage:'짧은 몸통 · 짧고 안정적인 다리', caution:'긴 몸통은 연속 코너에서 감속', color:'#a477b4', closed:false },
-  { id:'woodland', name:'납작납작 S자 숲길', subtitle:'S-CURVE · 낮은 터널', description:'직선과 S자 굴곡 사이, 낮은 터널과 진흙이 섞인 숲길.', advantage:'낮은 체형 · 안정적인 발 간격', caution:'롱다리는 터널 높이를 조심', color:'#72965e', closed:false },
+  { id:'straight', name:'쭉쭉 허들 직선', subtitle:'STRAIGHT · 보폭과 점프', description:'긴 직선 위로 허들과 물웅덩이가 이어지는 질주 코스.', advantage:'긴 다리 · 넓은 보폭', caution:'짧은 다리는 높은 허들에 주의', color:'#16915b', closed:false },
+  { id:'oval', name:'빙글빙글 원형 경기장', subtitle:'OVAL · 코너와 균형', description:'크게 휘어진 원형 트랙을 한 바퀴. 코너에서도 속도를 지켜요.', advantage:'넓은 다리 간격 · 낮은 중심', caution:'키가 크고 불안정하면 바깥 펜스에 쿵', color:'#3474e6', closed:true },
+  { id:'zigzag', name:'갈팡질팡 지그재그', subtitle:'ZIGZAG · 연속 방향 전환', description:'왼쪽, 오른쪽! 넓은 호로 이어지는 코너 사이에 돌길이 나타나요.', advantage:'짧은 몸통 · 짧고 안정적인 다리', caution:'긴 몸통은 연속 코너에서 감속', color:'#1195a3', closed:false },
+  { id:'woodland', name:'납작납작 S자 숲길', subtitle:'S-CURVE · 낮은 터널', description:'직선과 S자 굴곡 사이, 낮은 터널과 진흙이 섞인 숲길.', advantage:'낮은 체형 · 안정적인 발 간격', caution:'롱다리는 터널 높이를 조심', color:'#568b32', closed:false },
 ] as const;
 export function isTrackId(value: unknown): value is TrackId {
   return TRACKS.some(track => track.id === value);
@@ -559,7 +559,7 @@ export function sampleRace(race: Race, seconds: number): RaceFrame {
   };
 }
 
-const ink = '#34443d';
+const ink = '#22352b';
 const line = (points: number[][]): Stroke => ({ color: ink, points: points.map(([x, y]) => ({ x, y })) });
 
 /** Editable drawings, with noticeably different feet, stride, and body proportions. */

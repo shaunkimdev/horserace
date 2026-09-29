@@ -15,15 +15,23 @@ import {
   type Stroke,
   type TrackId,
 } from "@/lib/game";
-import { ROOM_DEFAULT_CAPACITY, type Room, type RoomAction, type RoomResponse, type RoomSession } from "@/lib/rooms";
+import {
+  ROOM_DEFAULT_CAPACITY,
+  type Room,
+  type RoomAction,
+  type RoomResponse,
+  type RoomSession,
+} from "@/lib/rooms";
 import RaceCanvas from "@/components/RaceCanvas";
 import TrackPicker from "@/components/TrackPicker";
 import RoomCapacity from "@/components/RoomCapacity";
 import { RoomConnection } from "@/lib/room-connection";
 import { RaceAudio } from "@/lib/race-audio";
+import StudioIcon from "@/components/StudioIcon";
+import ProductInfo from "@/components/ProductInfo";
 
-const COLORS = ["#272c21", "#ed653b", "#4264e9", "#ac3a8c"];
-const COLOR_NAMES = ["먹색", "주황", "파랑", "자주"];
+const COLORS = ["#22352b", "#16915b", "#3474e6", "#1195a3"];
+const COLOR_NAMES = ["먹색", "초록", "파랑", "청록"];
 type Stage = "draw" | "lobby" | "race" | "results";
 type Credentials = { code: string; playerId: string; token: string };
 
@@ -37,7 +45,7 @@ function paintAnimal(
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.lineWidth = 4.5;
+  ctx.lineWidth = 5;
   for (const stroke of strokes) {
     ctx.strokeStyle = color || stroke.color;
     ctx.beginPath();
@@ -120,10 +128,10 @@ function DrawingBoard({
     <div className="drawing-paper">
       <div className="paper-heading">
         <span>
-          <span className="tiny-dot" /> DRAW YOUR ATHLETE
+          <StudioIcon name="pencil" /> 나의 드로잉
         </span>
         <span>
-          오른쪽을 보고 그려주세요 <b>→</b>
+          머리는 오른쪽으로 <StudioIcon name="arrow" />
         </span>
       </div>
       <canvas
@@ -174,8 +182,9 @@ function DrawingBoard({
       />
       {!strokes.length && (
         <div className="blank-hint">
-          <span>여기에 당신의 선수를 그려주세요.</span>
-          <small>잘 그릴 필요는 없어요. 몸통과 다리만 있으면 출전!</small>
+          <StudioIcon name="pencil" />
+          <span>첫 번째 선을 그어보세요</span>
+          <small>몸통 하나, 떨어진 다리 둘. 새로운 러너의 시작!</small>
         </div>
       )}
       <div className="paper-tools">
@@ -190,18 +199,23 @@ function DrawingBoard({
               onClick={() => onColor(c)}
             />
           ))}
-          <span className="pen-label">자유롭게, 삐뚤빼뚤.</span>
+          <span className="pen-label">펜 색상</span>
         </div>
         <div className="drawing-actions">
           <button
+            aria-label="마지막 선 되돌리기"
             onClick={() => onChange(strokes.slice(0, -1))}
             disabled={!strokes.length}
           >
-            ↶ <span>되돌리기</span>
+            <StudioIcon name="undo" /> <span>되돌리기</span>
           </button>
           <span className="divider" />
-          <button onClick={() => onChange([])} disabled={!strokes.length}>
-            × <span>모두 지우기</span>
+          <button
+            aria-label="그림 모두 지우기"
+            onClick={() => onChange([])}
+            disabled={!strokes.length}
+          >
+            <StudioIcon name="trash" /> <span>모두 지우기</span>
           </button>
         </div>
       </div>
@@ -223,11 +237,11 @@ function Help({ close }: { close: () => void }) {
       <button className="dialog-close" onClick={close} aria-label="도움말 닫기">
         ×
       </button>
-      <span className="eyebrow">A VERY UNSERIOUS SPORT</span>
-      <h2>생긴 대로 달립니다.</h2>
+      <span className="eyebrow">플레이 가이드</span>
+      <h2>모양마다 잘 달리는 길이 있어요.</h2>
       <p>
-        그림의 아래쪽 윤곽에서 다리와 몸통 비율을 읽어요. 종을 알아맞히는 AI가
-        아니라, 그린 형태를 경주 능력으로 바꾸는 게임입니다.
+        다리 길이와 몸통 비율이 선수의 달리기 실력이 돼요. 나만의 모양을 만들고,
+        어울리는 트랙을 찾아보세요.
       </p>
       <div className="help-grid">
         <article>
@@ -289,9 +303,12 @@ export default function Home({
 } = {}) {
   const [trackId, setTrackId] = useState<TrackId>(DEFAULT_TRACK);
   const [capacity, setCapacity] = useState(ROOM_DEFAULT_CAPACITY);
+  const [productInfo, setProductInfo] = useState<"data" | "licenses" | null>(
+    null,
+  );
   const [stage, setStage] = useState<Stage>("draw"),
     [strokes, setStrokes] = useState<Stroke[]>(SAMPLE_ANIMALS[0].strokes),
-    [name, setName] = useState("아무튼 말"),
+    [name, setName] = useState(SAMPLE_ANIMALS[0].name),
     [color, setColor] = useState(COLORS[0]);
   const [mode, setMode] = useState<"solo" | "friends">("solo"),
     [joinCode, setJoinCode] = useState(""),
@@ -340,7 +357,8 @@ export default function Home({
   useEffect(() => {
     const visibility = () => raceAudio.current?.setVisible(!document.hidden);
     const appVisibility = (event: Event) => {
-      const visible = (event as CustomEvent<{ visible: boolean }>).detail?.visible;
+      const visible = (event as CustomEvent<{ visible: boolean }>).detail
+        ?.visible;
       raceAudio.current?.setVisible(visible === true && !document.hidden);
     };
     document.addEventListener("visibilitychange", visibility);
@@ -409,7 +427,7 @@ export default function Home({
           analyzeAnimal(draft.strokes).valid
         ) {
           setStrokes(draft.strokes);
-          setName(String(draft.name || "아무튼 말").slice(0, 20));
+          setName(String(draft.name || SAMPLE_ANIMALS[0].name).slice(0, 20));
         }
         const stored = JSON.parse(
           sessionStorage.getItem("draw-derby-room") || "null",
@@ -440,9 +458,13 @@ export default function Home({
       try {
         const data = (event as CustomEvent).detail;
         const draft = data?.draft;
-        if (draft && Array.isArray(draft.strokes) && analyzeAnimal(draft.strokes).valid) {
+        if (
+          draft &&
+          Array.isArray(draft.strokes) &&
+          analyzeAnimal(draft.strokes).valid
+        ) {
           setStrokes(draft.strokes);
-          setName(String(draft.name || "아무튼 말").slice(0, 20));
+          setName(String(draft.name || SAMPLE_ANIMALS[0].name).slice(0, 20));
         }
         if (isTrackId(data?.track)) setTrackId(data.track);
       } catch {
@@ -485,7 +507,8 @@ export default function Home({
     )
       return;
     roomRevision.current = { code: data.room.code, revision: data.revision };
-    if (sentAt !== undefined) serverOffset.current = data.serverNow - (sentAt + Date.now()) / 2;
+    if (sentAt !== undefined)
+      serverOffset.current = data.serverNow - (sentAt + Date.now()) / 2;
     setError((previous) =>
       previous.startsWith("연결이 잠시 끊겼어요.") ? "" : previous,
     );
@@ -542,16 +565,29 @@ export default function Home({
   useEffect(() => {
     if (!session) return;
     const transport = new RoomConnection(session, {
-      state: data => applyRoom(data),
-      clock: offset => { serverOffset.current = offset; },
-      status: connected => setError(previous => connected
-        ? (previous.startsWith("연결이 잠시 끊겼어요.") ? "" : previous)
-        : "연결이 잠시 끊겼어요. 자동으로 다시 연결하고 있어요."),
-      ended: message => { forget(); setStage("draw"); setError(message); },
+      state: (data) => applyRoom(data),
+      clock: (offset) => {
+        serverOffset.current = offset;
+      },
+      status: (connected) =>
+        setError((previous) =>
+          connected
+            ? previous.startsWith("연결이 잠시 끊겼어요.")
+              ? ""
+              : previous
+            : "연결이 잠시 끊겼어요. 자동으로 다시 연결하고 있어요.",
+        ),
+      ended: (message) => {
+        forget();
+        setStage("draw");
+        setError(message);
+      },
     });
     connection.current = transport;
     transport.start();
-    const resume = () => { if (!document.hidden) transport.resume(); };
+    const resume = () => {
+      if (!document.hidden) transport.resume();
+    };
     document.addEventListener("visibilitychange", resume);
     document.addEventListener("draw-derby-visibility", resume);
     return () => {
@@ -633,7 +669,8 @@ export default function Home({
     beep();
     const sentAt = Date.now();
     try {
-      if (!connection.current) throw new Error("서버에 연결하고 있어요. 잠시 후 시도해 주세요.");
+      if (!connection.current)
+        throw new Error("서버에 연결하고 있어요. 잠시 후 시도해 주세요.");
       const data = await connection.current.action(action);
       if (action.action === "leave") {
         forget();
@@ -706,11 +743,37 @@ export default function Home({
           }}
           aria-label="Draw Derby 홈"
         >
-          <span className="checker-icon" />
-          DRAW DERBY<span className="logo-period">®</span>
+          <span className="brand-mark">
+            <StudioIcon name="pencil" />
+          </span>
+          <span>
+            draw derby<span className="brand-caption">드로우 더비</span>
+          </span>
         </button>
+        <ol className="journey" aria-label="플레이 진행 단계">
+          {["선수 만들기", "함께 달리기", "결과 보기"].map((label, index) => {
+            const current = stage === "draw" ? 0 : stage === "results" ? 2 : 1;
+            return (
+              <li
+                key={label}
+                className={
+                  current === index
+                    ? "is-current"
+                    : current > index
+                      ? "is-complete"
+                      : ""
+                }
+                aria-current={current === index ? "step" : undefined}
+              >
+                <span>
+                  {current > index ? <StudioIcon name="check" /> : index + 1}
+                </span>
+                {label}
+              </li>
+            );
+          })}
+        </ol>
         <div className="header-right">
-          <span className="edition">A VERY UNSERIOUS SPORT.</span>
           <button
             className={`sound-button ${sound && stage === "race" && elapsed >= 0 ? "is-playing" : ""}`}
             onClick={() => {
@@ -754,235 +817,305 @@ export default function Home({
         </div>
       )}
       {stage === "draw" && (
-        <>
-          <section className="hero">
+        <section className="studio" aria-labelledby="studio-title">
+          <div className="studio-heading">
             <div>
-              <div className="eyebrow">
-                <span className="live-dot" /> NO TALENT REQUIRED. JUST LEGS.
-              </div>
-              <h1>
-                Draw a horse.
-                <br />
-                <span>Then race it.</span>
+              <span className="eyebrow">
+                <span className="tiny-dot" /> 나만의 낙서 운동장
+              </span>
+              <h1 id="studio-title">
+                오늘의 선수, <em>직접 그려볼까요?</em>
               </h1>
-            </div>
-            <div className="hero-aside">
-              <div className="player-dots">
-                {COLORS.map((c, i) => (
-                  <span key={c} style={{ background: c }}>
-                    {i + 1}
-                  </span>
-                ))}
-                <b>1–4 PLAYERS</b>
-              </div>
               <p>
-                말이 아니어도 괜찮아요.
-                <br />
-                당신의 낙서가 선수가 됩니다.
+                다리 길이도, 몸통 모양도 자유롭게. 내가 그린 모습으로 달려요.
               </p>
-              <button className="text-link" onClick={() => setHelp(true)}>
-                어떻게 달리나요? <span>↗</span>
-              </button>
             </div>
-          </section>
-          <DrawingBoard
-            strokes={strokes}
-            onChange={setStrokes}
-            color={color}
-            onColor={setColor}
-            onLimit={setNotice}
-          />
-          <section className="athlete-strip" aria-label="그림 분석 결과">
-            <span className="analysis-label">
-              <span className={`tiny-dot ${stats.valid ? "" : "muted"}`} />
-              {stats.valid ? "선수 분석 완료" : "선수를 그려주세요"}
-            </span>
-            {stats.valid ? (
-              <>
-                <div className="stat">
-                  <span>다리 길이</span>
-                  <b>
-                    {stats.legLength > 0.46
-                      ? "롱다리"
-                      : stats.legLength > 0.3
-                        ? "적당해요"
-                        : "숏다리"}
-                  </b>
-                  <span className="mini-meter">
-                    <i style={{ width: `${stats.legLength * 100}%` }} />
-                  </span>
-                </div>
-                <div className="stat">
-                  <span>다리 간격</span>
-                  <b>
-                    {stats.legSpacing > 0.6
-                      ? "넓어요"
-                      : stats.legSpacing > 0.35
-                        ? "균형 잡힘"
-                        : "좁아요"}
-                  </b>
-                  <span className="mini-meter">
-                    <i style={{ width: `${stats.legSpacing * 100}%` }} />
-                  </span>
-                </div>
-                <div className="stat">
-                  <span>안정성</span>
-                  <b>
-                    {stats.stability}
-                    <small>/100</small>
-                  </b>
-                  <span className="mini-meter">
-                    <i style={{ width: `${stats.stability}%` }} />
-                  </span>
-                </div>
-              </>
-            ) : (
-              <span className="analysis-hint">
-                {stats.reason || "몸통과 두 개 이상의 다리를 그려주세요."}
-              </span>
-            )}
-            <button
-              className="info-circle"
-              onClick={() => setHelp(true)}
-              aria-label="형태 분석 도움말"
-            >
-              ?
+            <button className="guide-button" onClick={() => setHelp(true)}>
+              <StudioIcon name="help" /> 처음이라면
             </button>
-          </section>
-          <TrackPicker
-            selected={trackId}
-            onSelect={setTrackId}
-            stats={stats}
-            disabled={!!session}
-          />
-          <section className="entry-controls">
-            <label className="name-field">
-              <span>
-                선수 이름 <small>NAME YOUR ATHLETE</small>
-              </span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={20}
-                placeholder="아무튼 말"
-                aria-label="선수 이름"
-              />
-            </label>
-            <div className="race-mode">
-              <span className="field-caption">
-                함께하면 더 이상하고, 더 재밌어요.
-              </span>
-              <div className="mode-tabs">
-                <button
-                  className={mode === "solo" ? "active" : ""}
-                  onClick={() => setMode("solo")}
-                  disabled={!!session}
-                >
-                  혼자 연습 <small>+ AI 3</small>
-                </button>
-                <button
-                  className={mode === "friends" ? "active" : ""}
-                  onClick={() => offline ? onPlayOnline?.() : setMode("friends")}
-                  disabled={!!session}
-                >
-                  친구와 경주 <small>최대 8인</small>
-                </button>
-              </div>
-            </div>
-            <button
-              className="button dark start-button"
-              disabled={busy || !stats.valid}
-              onClick={() =>
-                session
-                  ? void roomAction({ action: "animal", animal })
-                  : mode === "solo"
-                    ? practice()
-                    : void openRoom(false)
-              }
-            >
-              {busy
-                ? "연결하는 중…"
-                : session
-                  ? "선수 저장하기"
-                  : mode === "solo"
-                    ? "자, 달려볼까요?"
-                    : "새 대기방 만들기"}
-              <span>→</span>
-            </button>
-          </section>
-          {mode === "friends" && !session && (
-            <RoomCapacity value={capacity} onChange={setCapacity} disabled={busy} />
-          )}
-          {mode === "friends" && !session && (
-            <form
-              className="join-panel"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void openRoom(true);
-              }}
-            >
-              <div>
-                <b>이미 친구가 방을 만들었나요?</b>
-                <span>초대받은 6자리 코드를 입력하세요.</span>
-              </div>
-              <div className="join-input">
-                <input
-                  aria-label="6자리 방 코드"
-                  placeholder="방 코드 6자리"
-                  value={joinCode}
-                  maxLength={6}
-                  onChange={(e) =>
-                    setJoinCode(
-                      e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""),
-                    )
-                  }
-                />
-                <button
-                  className="button outline"
-                  disabled={busy || joinCode.length !== 6 || !stats.valid}
-                >
-                  참가하기 ↗
-                </button>
-              </div>
-            </form>
-          )}
-          <div className="borrow-row">
-            <span>빈 종이가 막막하다면?</span>
-            {SAMPLE_ANIMALS.map((a, i) => (
-              <button
-                key={a.name}
-                onClick={() => {
-                  setStrokes(a.strokes.map((s) => ({ ...s, color })));
-                  setName(a.name);
-                  setError("");
-                }}
-              >
-                {["말 한 마리 빌리기", "롱다리", "길쭉이", "폴짝이"][i]}
-                <span>↗</span>
-              </button>
-            ))}
           </div>
-          <section className="course-note">
-            <span className="eyebrow">SAME TRACK. DIFFERENT CREATURES.</span>
-            <p>
-              허들, 물웅덩이, 진흙, 낮은 터널, 돌길.
-              <br />
-              <strong>어떻게 그렸느냐에 따라, 다르게 달려요.</strong>
-            </p>
-            <div className="obstacle-chips">
-              <span>⌁ 허들</span>
-              <span>≈ 물웅덩이</span>
-              <span>▧ 진흙</span>
-              <span>⊓ 터널</span>
-              <span>∴ 돌길</span>
+          <div className="studio-grid">
+            <div className="studio-workspace">
+              <div className="workspace-heading">
+                <h2>
+                  <span className="step-number">01</span> 선수 만들기
+                </h2>
+                <span className="local-save">
+                  <span className="tiny-dot" /> 이 기기에 자동 저장
+                </span>
+              </div>
+              <DrawingBoard
+                strokes={strokes}
+                onChange={setStrokes}
+                color={color}
+                onColor={setColor}
+                onLimit={setNotice}
+              />
+              <section className="athlete-strip" aria-label="그림 분석 결과">
+                <span className="analysis-label">
+                  <span className={`tiny-dot ${stats.valid ? "" : "muted"}`} />
+                  {stats.valid ? "선수 분석 완료" : "선수를 그려주세요"}
+                </span>
+                {stats.valid ? (
+                  <>
+                    <div className="stat">
+                      <span>다리 길이</span>
+                      <b>
+                        {stats.legLength > 0.46
+                          ? "롱다리"
+                          : stats.legLength > 0.3
+                            ? "적당해요"
+                            : "숏다리"}
+                      </b>
+                      <span className="mini-meter">
+                        <i style={{ width: `${stats.legLength * 100}%` }} />
+                      </span>
+                    </div>
+                    <div className="stat">
+                      <span>다리 간격</span>
+                      <b>
+                        {stats.legSpacing > 0.6
+                          ? "넓어요"
+                          : stats.legSpacing > 0.35
+                            ? "균형 잡힘"
+                            : "좁아요"}
+                      </b>
+                      <span className="mini-meter">
+                        <i style={{ width: `${stats.legSpacing * 100}%` }} />
+                      </span>
+                    </div>
+                    <div className="stat">
+                      <span>안정성</span>
+                      <b>
+                        {stats.stability}
+                        <small>/100</small>
+                      </b>
+                      <span className="mini-meter">
+                        <i style={{ width: `${stats.stability}%` }} />
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <span className="analysis-hint">
+                    {stats.reason || "몸통과 두 개 이상의 다리를 그려주세요."}
+                  </span>
+                )}
+                <button
+                  className="info-circle"
+                  onClick={() => setHelp(true)}
+                  aria-label="형태 분석 도움말"
+                >
+                  ?
+                </button>
+              </section>
+
+              <div className="sample-picker">
+                <div className="sample-heading">
+                  <b>이 친구로 시작해도 좋아요</b>
+                  <span>선택한 뒤 자유롭게 고쳐보세요</span>
+                </div>
+                <div
+                  className="sample-options"
+                  role="group"
+                  aria-label="예시 선수 선택"
+                >
+                  {SAMPLE_ANIMALS.map((a) => (
+                    <button
+                      key={a.name}
+                      onClick={() => {
+                        setStrokes(a.strokes.map((s) => ({ ...s, color })));
+                        setName(a.name);
+                        setError("");
+                      }}
+                      aria-label={a.name + " 예시로 시작"}
+                    >
+                      <AnimalPreview animal={a} color={color} />
+                      <span>{a.name}</span>
+                      <StudioIcon name="arrow" />
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          </section>
-        </>
+            <aside className="studio-sidebar" aria-label="경주 준비">
+              <div className="launch-card">
+                <div className="launch-heading">
+                  <span className="step-number">02</span>
+                  <h2>출발 준비</h2>
+                  <StudioIcon name="flag" />
+                </div>
+                <section className="entry-controls">
+                  <label className="name-field">
+                    <span>
+                      선수 이름 <small>최대 20자</small>
+                    </span>
+                    <input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      maxLength={20}
+                      placeholder="러너의 이름을 지어주세요"
+                      aria-label="선수 이름"
+                    />
+                  </label>
+                  <div className="race-mode">
+                    <span className="field-caption">플레이 방식</span>
+                    <div
+                      className="mode-tabs"
+                      role="group"
+                      aria-label="플레이 방식"
+                    >
+                      <button
+                        className={mode === "solo" ? "active" : ""}
+                        aria-pressed={mode === "solo"}
+                        onClick={() => setMode("solo")}
+                        disabled={!!session}
+                      >
+                        <StudioIcon name="play" /> 혼자 연습{" "}
+                        <small>AI 3명과</small>
+                      </button>
+                      <button
+                        className={mode === "friends" ? "active" : ""}
+                        aria-pressed={mode === "friends"}
+                        onClick={() =>
+                          offline ? onPlayOnline?.() : setMode("friends")
+                        }
+                        disabled={!!session}
+                      >
+                        <StudioIcon name="people" /> 친구와 경주{" "}
+                        <small>2~8명</small>
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    className="button dark start-button"
+                    disabled={busy || !stats.valid}
+                    onClick={() =>
+                      session
+                        ? void roomAction({ action: "animal", animal })
+                        : mode === "solo"
+                          ? practice()
+                          : void openRoom(false)
+                    }
+                  >
+                    {busy
+                      ? "연결하는 중…"
+                      : session
+                        ? "선수 저장하기"
+                        : mode === "solo"
+                          ? "연습 경주 시작"
+                          : "친구 초대방 만들기"}
+                    <StudioIcon name="arrow" />
+                  </button>
+                </section>
+                {mode === "friends" && !session && (
+                  <RoomCapacity
+                    value={capacity}
+                    onChange={setCapacity}
+                    disabled={busy}
+                  />
+                )}
+                {mode === "friends" && !session && (
+                  <form
+                    className="join-panel"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void openRoom(true);
+                    }}
+                  >
+                    <div>
+                      <b>초대 코드가 있나요?</b>
+                      <span>같은 코드로 함께 모여요.</span>
+                    </div>
+                    <div className="join-input">
+                      <input
+                        aria-label="6자리 방 코드"
+                        placeholder="방 코드 6자리"
+                        value={joinCode}
+                        maxLength={6}
+                        onChange={(e) =>
+                          setJoinCode(
+                            e.target.value
+                              .toUpperCase()
+                              .replace(/[^A-Z0-9]/g, ""),
+                          )
+                        }
+                      />
+                      <button
+                        className="button outline"
+                        disabled={busy || joinCode.length !== 6 || !stats.valid}
+                      >
+                        참가하기 ↗
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="selected-course">
+                  <StudioIcon name="flag" />
+                  <div>
+                    <span>선택한 트랙</span>
+                    <b>{getTrack(trackId).name}</b>
+                  </div>
+                  <a href="#courses" aria-label="아래에서 트랙 선택">
+                    변경 <span aria-hidden="true">↓</span>
+                  </a>
+                </div>
+                <p className="launch-note">
+                  {offline
+                    ? "혼자 연습은 인터넷 없이도 가능해요."
+                    : "가입 없이 플레이 · 그림은 기기에 저장"}
+                </p>
+              </div>
+              <div className="coach-card">
+                {/* Shared with the offline WebView; no image optimization server is available there. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={offline ? "./studio-buddy.png" : "/studio-buddy.png"}
+                  width="160"
+                  height="160"
+                  decoding="async"
+                  alt="민트 스카프를 두르고 달리는 파란 더비 친구"
+                />
+                <div>
+                  <span className="eyebrow">작은 팁</span>
+                  <h3>
+                    길쭉? 통통?
+                    <br />
+                    모두 환영이에요.
+                  </h3>
+                  <p>
+                    몸통과 떨어진 다리 두 개면
+                    <br />
+                    출발할 준비 완료!
+                  </p>
+                </div>
+              </div>
+            </aside>
+          </div>
+          <div id="courses" className="courses-section">
+            <TrackPicker
+              selected={trackId}
+              onSelect={setTrackId}
+              stats={stats}
+              disabled={!!session}
+            />
+          </div>
+          <div className="studio-tip">
+            <StudioIcon name="spark" />
+            <p>
+              <b>모양을 바꾸면, 경주도 달라져요.</b> 긴 다리는 허들에, 낮은
+              몸통은 터널에 유리해요.
+            </p>
+            <button onClick={() => setHelp(true)}>
+              플레이 가이드 <StudioIcon name="arrow" />
+            </button>
+          </div>
+        </section>
       )}
       {stage === "lobby" && (
         <section className="lobby">
           <div className="section-top">
-            <span className="eyebrow">THE QUESTIONABLE DERBY</span>
+            <span className="eyebrow">친구와 함께</span>
             <button
               className="text-link"
               disabled={busy}
@@ -993,7 +1126,7 @@ export default function Home({
           </div>
           <div className="lobby-title">
             <div>
-              <h1>선수들, 모이세요.</h1>
+              <h1>우리의 출발선</h1>
               <p>각자의 낙서로, 하나의 출발선에. 모두 준비되면 출발합니다.</p>
             </div>
             {room && (
@@ -1002,7 +1135,7 @@ export default function Home({
                 onClick={() => void shareRoom()}
                 aria-label={`방 코드 ${room.code}, 초대 링크 복사`}
               >
-                <small>ROOM CODE · 초대 링크 복사</small>
+                <small>초대 코드 · 눌러서 링크 복사</small>
                 <strong>{room.code}</strong>
                 <span>↗</span>
               </button>
@@ -1020,69 +1153,77 @@ export default function Home({
             occupied={room?.players.length}
             disabled={busy || !isHost}
             hostOnly={!isHost}
-            onChange={(value) => void roomAction({ action: "capacity", capacity: value })}
+            onChange={(value) =>
+              void roomAction({ action: "capacity", capacity: value })
+            }
           />
           <div className="lobby-grid">
-            {Array.from({ length: room?.capacity ?? ROOM_DEFAULT_CAPACITY }, (_, i) => {
-              const p = room?.players[i];
-              return (
-                <article
-                  key={p?.id || i}
-                  className={`player-card ${!p ? "empty" : ""}`}
-                  style={
-                    {
-                      "--player-color": p?.color || "#879076",
-                    } as React.CSSProperties
-                  }
-                >
-                  <div className="player-card-top">
-                    <span>PLAYER 0{i + 1}</span>
-                    <b>
-                      {p
-                        ? p.id === room?.hostId
-                          ? "HOST"
-                          : p.id === session?.playerId
-                            ? "YOU"
-                            : "GUEST"
-                        : "OPEN"}
-                    </b>
-                  </div>
-                  {p ? (
-                    <>
-                      <AnimalPreview animal={p.animal} color={p.color} />
-                      <h3>
-                        {p.name}
-                        {p.id === session?.playerId && <small>나</small>}
-                      </h3>
-                      <span
-                        className={`ready-status ${p.ready ? "is-ready" : ""}`}
-                      >
-                        <i />
-                        {!p.connected
-                          ? "다시 연결하는 중"
-                          : p.ready
-                            ? "준비 완료!"
-                            : "출발 준비 중"}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <div className="empty-plus">+</div>
-                      <h3>친구를 기다리는 중</h3>
-                      <span className="ready-status">
-                        방 코드를 공유해 주세요
-                      </span>
-                    </>
-                  )}
-                </article>
-              );
-            })}
+            {Array.from(
+              { length: room?.capacity ?? ROOM_DEFAULT_CAPACITY },
+              (_, i) => {
+                const p = room?.players[i];
+                return (
+                  <article
+                    key={p?.id || i}
+                    className={`player-card ${!p ? "empty" : ""}`}
+                    style={
+                      {
+                        "--player-color": p?.color || "#879076",
+                      } as React.CSSProperties
+                    }
+                  >
+                    <div className="player-card-top">
+                      <span>PLAYER 0{i + 1}</span>
+                      <b>
+                        {p
+                          ? p.id === room?.hostId
+                            ? "HOST"
+                            : p.id === session?.playerId
+                              ? "YOU"
+                              : "GUEST"
+                          : "OPEN"}
+                      </b>
+                    </div>
+                    {p ? (
+                      <>
+                        <AnimalPreview animal={p.animal} color={p.color} />
+                        <h3>
+                          {p.name}
+                          {p.id === session?.playerId && <small>나</small>}
+                        </h3>
+                        <span
+                          className={`ready-status ${p.ready ? "is-ready" : ""}`}
+                        >
+                          <i />
+                          {!p.connected
+                            ? "다시 연결하는 중"
+                            : p.ready
+                              ? "준비 완료!"
+                              : "출발 준비 중"}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="empty-plus">+</div>
+                        <h3>친구를 기다리는 중</h3>
+                        <span className="ready-status">
+                          방 코드를 공유해 주세요
+                        </span>
+                      </>
+                    )}
+                  </article>
+                );
+              },
+            )}
           </div>
           <div className="lobby-bottom">
             <div className="lobby-helper">
               <span className="live-dot" />
               <p>
-                <b>{room?.players.length || 0}/{room?.capacity ?? ROOM_DEFAULT_CAPACITY}명 입장</b>
+                <b>
+                  {room?.players.length || 0}/
+                  {room?.capacity ?? ROOM_DEFAULT_CAPACITY}명 입장
+                </b>
                 <span>최소 2명부터 출발할 수 있어요.</span>
               </p>
             </div>
@@ -1137,11 +1278,11 @@ export default function Home({
           <div className="section-top">
             <span className="eyebrow">
               {isMultiplayerRace
-                ? `ROOM ${room?.code} · LIVE DERBY`
-                : "PRACTICE DERBY · YOU + 3 AI"}
+                ? `방 ${room?.code} · 친구와 경주`
+                : "연습 경주 · AI 선수 3명과 함께"}
             </span>
             <span className="race-timer">
-              {Math.max(0, elapsed).toFixed(1)} <small>SEC</small>
+              {Math.max(0, elapsed).toFixed(1)} <small>초</small>
             </span>
           </div>
           <div className="race-title">
@@ -1151,7 +1292,7 @@ export default function Home({
             </h1>
             <span className="live-badge">
               <span className="live-dot" />
-              {elapsed < 0 ? "GET READY" : "ON TRACK"}
+              {elapsed < 0 ? "출발 준비" : "달리는 중"}
             </span>
           </div>
           <div className="race-track-banner">
@@ -1175,7 +1316,7 @@ export default function Home({
                     <b>{i + 1}</b>
                     <i style={{ background: p.color }} />
                     <span>{p.name}</span>
-                    {s.id === myId && <small>YOU</small>}
+                    {s.id === myId && <small>나</small>}
                   </div>
                 );
               })}
@@ -1188,7 +1329,7 @@ export default function Home({
             )}
           </div>
           <div className="race-progress">
-            <span>START</span>
+            <span>출발</span>
             <div>
               <i
                 style={{
@@ -1216,17 +1357,17 @@ export default function Home({
       )}
       {stage === "results" && race && (
         <section className="results">
-          <span className="eyebrow">EVERY DOODLE HAS ITS DAY.</span>
+          <span className="eyebrow">오늘의 레이스 노트</span>
           <div className="result-heading">
             <div>
               <span className="result-kicker">
                 {myResult?.place === 1
-                  ? "우승도 낙서에서 시작됩니다."
-                  : "폼은 달라도, 완주는 멋지니까."}
+                  ? "작은 낙서가 해냈어요."
+                  : "한 바퀴만큼 자란 우리 선수."}
               </span>
               <h1>
                 {myResult?.place === 1
-                  ? "이 낙서, 제법인데요?"
+                  ? "오늘의 멋진 1등!"
                   : "끝까지 잘 달렸어요."}
               </h1>
               <p>
@@ -1236,7 +1377,7 @@ export default function Home({
             </div>
             <div className="place-stamp">
               <strong>{myResult?.place}</strong>
-              <span>PLACE</span>
+              <span>위로 완주!</span>
             </div>
           </div>
           <div className="race-track-banner">
@@ -1261,7 +1402,7 @@ export default function Home({
                     <b className="rank">{String(r.place).padStart(2, "0")}</b>
                     <AnimalPreview animal={p.animal} color={p.color} />
                     <strong>{r.name}</strong>
-                    {r.id === myId && <span className="you-tag">YOU</span>}
+                    {r.id === myId && <span className="you-tag">나</span>}
                   </div>
                   <strong>
                     {r.time.toFixed(2)}
@@ -1323,12 +1464,20 @@ export default function Home({
           </div>
         </section>
       )}
-      <footer>
-        <span>DRAW A LITTLE. RACE A LOT.</span>
-        <span>그림 실력은 선택. 다리는 필수.</span>
-        <button onClick={() => setHelp(true)}>게임 안내 ↗</button>
+      <footer className="site-footer">
+        <span className="footer-brand">
+          draw derby <span>나만의 낙서 운동장</span>
+        </span>
+        <button onClick={() => setHelp(true)}>플레이 가이드</button>
+        <button onClick={() => setProductInfo("data")}>저장·공유 안내</button>
+        <button onClick={() => setProductInfo("licenses")}>
+          오픈소스 안내
+        </button>
       </footer>
       {help && <Help close={() => setHelp(false)} />}
+      {productInfo && (
+        <ProductInfo kind={productInfo} close={() => setProductInfo(null)} />
+      )}
     </main>
   );
 }

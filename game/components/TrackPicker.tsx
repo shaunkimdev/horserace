@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import StudioIcon from "./StudioIcon";
 import {
   getTrack,
   trackPoint,
@@ -36,15 +37,15 @@ export function paintTrackRoad(
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   traceTrack(ctx, id);
-  ctx.strokeStyle = "#9dae852e";
+  ctx.strokeStyle = "#708cb522";
   ctx.lineWidth = 124;
   ctx.stroke();
   traceTrack(ctx, id);
-  ctx.strokeStyle = "#aab995";
+  ctx.strokeStyle = "#c1cfe6";
   ctx.lineWidth = 112;
   ctx.stroke();
   traceTrack(ctx, id);
-  ctx.strokeStyle = "#fbfcf4";
+  ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 106;
   ctx.stroke();
   if (detailed) {
@@ -52,7 +53,7 @@ export function paintTrackRoad(
       traceTrack(ctx, id, offset);
       ctx.setLineDash([9, 12]);
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "#c8d2b9";
+      ctx.strokeStyle = "#c9d5e9";
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -130,13 +131,17 @@ export default function TrackPicker({
     <section className="track-picker" aria-label="트랙 선택">
       <div className="track-picker-heading">
         <div>
-          <span className="eyebrow">PICK YOUR PLAYGROUND</span>
-          <h2>어떤 길을 달려볼까요?</h2>
+          <span className="eyebrow">
+            {lobby ? "이번 경주의 코스" : "러너에게 어울리는 길"}
+          </span>
+          <h2>
+            {!lobby && <span className="step-number">03</span>} 트랙 고르기
+          </h2>
         </div>
         <p>
           {lobby
             ? "방장이 트랙을 바꾸면 모두 다시 준비해요."
-            : "네 가지 길, 네 가지 다른 전략."}
+            : "어떤 코스가 우리 선수와 잘 맞을까요?"}
           <br />
           <span>유리한 체형을 살펴보고 골라보세요.</span>
         </p>
@@ -158,8 +163,12 @@ export default function TrackPicker({
               style={{ "--track-accent": track.color } as React.CSSProperties}
             >
               <div className="track-card-top">
-                <span>TRACK 0{i + 1}</span>
-                <i>{selected === track.id ? "✓" : "↗"}</i>
+                <span>코스 0{i + 1}</span>
+                <i>
+                  <StudioIcon
+                    name={selected === track.id ? "check" : "arrow"}
+                  />
+                </i>
               </div>
               <TrackMap trackId={track.id} />
               <span className="track-subtitle">{track.subtitle}</span>

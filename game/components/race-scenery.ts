@@ -7,7 +7,7 @@ import {
 } from "../lib/game.ts";
 import { RACE_VIEW, type RaceCamera } from "../lib/race-camera.ts";
 
-const INK = "#29352d";
+const INK = "#182b26";
 const visible = (p: Point, margin = 180, width: number = RACE_VIEW.width) =>
   p.x > -margin &&
   p.x < width + margin &&
@@ -92,13 +92,21 @@ export function paintFence(
   foreground = false,
 ) {
   const offset = foreground ? 53.04 : -59.28;
-  for (const height of [12, 28])
+  // The darker lower face and white top make both rails read as solid beams.
+  for (const height of [12, 28]) {
+    strokeEdge(
+      ctx,
+      edge(camera, offset + 0.8, camera.from, camera.to, height - 3),
+      "#afc8b5",
+      6,
+    );
     strokeEdge(
       ctx,
       edge(camera, offset, camera.from, camera.to, height),
-      "#fffffb",
+      "#ffffff",
       5,
     );
+  }
   for (let m = Math.floor(camera.from / 46) * 46; m <= camera.to; m += 46) {
     const p = camera.project(m, offset);
     if (!visible(p, 60, camera.width)) continue;
@@ -106,10 +114,10 @@ export function paintFence(
       ctx,
       { x: p.x + 3, y: p.y + 2 },
       { x: p.x + 1, y: p.y - 42 },
-      "#c9d9b5",
+      "#afc8b5",
       5,
     );
-    line(ctx, p, { x: p.x - 2, y: p.y - 43 }, "#fffffb", 6);
+    line(ctx, p, { x: p.x - 2, y: p.y - 43 }, "#ffffff", 6);
   }
 }
 
@@ -127,7 +135,7 @@ function paintGate(
       ctx,
       camera.project(metres, -57.2),
       camera.project(metres, 49.4),
-      "#c6d5b5",
+      "#c6d7e2",
       2,
     );
     ctx.restore();
@@ -145,7 +153,7 @@ function paintGate(
           camera.project(m + 3.75, offset + 4.056),
           camera.project(m, offset + 4.056),
         ],
-        (row + col) % 2 ? "#fafbf1" : "#40503d",
+        (row + col) % 2 ? "#ffffff" : "#3e5270",
       );
     }
   }
@@ -153,7 +161,7 @@ function paintGate(
   line(ctx, p, raised(p, 65), INK, 3);
   ctx.fillStyle = INK;
   ctx.fillRect(p.x, p.y - 65, 83, 27);
-  ctx.fillStyle = "#d6f347";
+  ctx.fillStyle = "#ffffff";
   ctx.font = "800 13px Arial, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText("FINISH", p.x + 42, p.y - 46);
@@ -166,7 +174,7 @@ export function paintCourse(
   race: Race,
   time: number,
 ) {
-  ctx.fillStyle = race.trackId === "woodland" ? "#dce8cf" : "#e5eed3";
+  ctx.fillStyle = race.trackId === "woodland" ? "#dceee2" : "#e7f3e1";
   ctx.fillRect(0, 0, camera.width, RACE_VIEW.height);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -205,15 +213,15 @@ export function paintCourse(
       ...edge(camera, -57.2, camera.from, camera.to, -8),
       ...edge(camera, 50.7, camera.to, camera.from, -8),
     ],
-    "#d7e2c6",
+    "#bfd4bc",
   );
   polygon(
     ctx,
     [...edge(camera, -57.2), ...edge(camera, 50.7, camera.to, camera.from)],
-    "#fbfcf4",
+    "#fcfdf9",
   );
   for (const offset of camera.laneLines)
-    strokeEdge(ctx, edge(camera, offset), "#e8ecdf", 1.5);
+    strokeEdge(ctx, edge(camera, offset), "#dfe7da", 1.5);
   paintFence(ctx, camera);
   for (
     let m = Math.ceil(Math.max(0, camera.from) / 100) * 100;
@@ -320,18 +328,18 @@ export function paintObstacle(
     const h = 24 + obstacle.height * 28;
     ellipse(ctx, p(width / 2, -7), Math.min(55, width / 2 + 15), 8, "#dbe0cd");
     for (const u of [10, width - 8]) {
-      line(ctx, p(u, -2), p(u, 0, h), "#82664c", 7);
-      line(ctx, p(u - 8), p(u + 9), "#987657", 4);
+      line(ctx, p(u, -2), p(u, 0, h), "#4c8870", 7);
+      line(ctx, p(u - 8), p(u + 9), "#6eaa85", 4);
     }
-    strokeEdge(ctx, run(4, width, 0, h - 3), "#b88760", 13);
-    strokeEdge(ctx, run(3, width, 0, h), "#dbad7c", 9);
+    strokeEdge(ctx, run(4, width, 0, h - 3), "#76a18a", 13);
+    strokeEdge(ctx, run(3, width, 0, h), "#ffffff", 9);
     for (let i = 0; i < 3; i++)
       line(
         ctx,
         p(12 + i * 22, 0, h + 3),
         p(16 + i * 22, 0, h - 3),
-        "#a17750",
-        1.5,
+        "#239368",
+        6,
       );
   } else if (obstacle.type === "rocks") {
     for (let i = 0; i < 5; i++) {

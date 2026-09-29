@@ -1,15 +1,18 @@
 import { trackPoint, type TrackId } from "./game.ts";
 
-/** The original straight-track framing, shared by every course. */
+/** Shared oblique view: visible lane depth, raised rails and room for the runners. */
 export const RACE_VIEW = {
   width: 1200,
   height: 620,
   pixelsPerMetre: 3.2,
-  anchorX: 260,
-  centerY: 339,
+  anchorX: 400,
+  centerY: 350,
   laneSpacing: 100,
-  animalWidth: 170,
-  animalHeight: 102,
+  animalWidth: 224,
+  animalHeight: 132,
+  groundSlope: 0.18,
+  depthSkew: 0.42,
+  depthScale: 0.9,
 } as const;
 
 // Open up the bends in the close view instead of stretching lateral world distances.
@@ -38,6 +41,13 @@ export function createRaceCamera(
   const laneScale = laneSpacing / RACE_VIEW.laneSpacing;
   const lateralScale = RACE_VIEW.laneSpacing / 26;
   const metresToPixels = RACE_VIEW.pixelsPerMetre;
+
+  // Apply one ground-plane projection to runners, lanes, rails and obstacles.
+  // A parallel projection keeps drawings readable while revealing the track's depth.
+  const ground = (x: number, y: number) => ({
+    x: RACE_VIEW.anchorX + x + y * RACE_VIEW.depthSkew,
+    y: RACE_VIEW.centerY - x * RACE_VIEW.groundSlope + y * RACE_VIEW.depthScale,
+  });
 
   function roadAngle(metres: number) {
     let progress = metres / distance;
@@ -74,10 +84,7 @@ export function createRaceCamera(
   function project(metres: number, offset = 0) {
     if (trackId === "straight") {
       const forward = (metres - follow) * metresToPixels;
-      return {
-        x: RACE_VIEW.anchorX + forward,
-        y: RACE_VIEW.centerY - forward * 0.1 + offset * lateralScale,
-      };
+      return ground(forward, offset * lateralScale);
     }
     const delta = metres - follow;
     const points = delta >= 0 ? ahead : behind;
@@ -101,10 +108,7 @@ export function createRaceCamera(
       (b.y - a.y) * mix +
       Math.sin(heading) * beyond * metresToPixels +
       Math.cos(heading) * offset * lateralScale;
-    return {
-      x: RACE_VIEW.anchorX + x,
-      y: RACE_VIEW.centerY - x * 0.1 + y,
-    };
+    return ground(x, y);
   }
 
   return {
@@ -116,10 +120,10 @@ export function createRaceCamera(
     laneLines: Array.from({ length: laneCount + 1 }, (_, i) =>
       (i * laneSpacing - (laneCount - 1) * laneSpacing / 2 - 60 * laneScale) * 0.26),
     follow,
-    from: follow - 130,
+    from: follow - 200,
     to: follow + 360 + Math.max(0, width - RACE_VIEW.width) / metresToPixels,
     project,
-    /** Keep all lanes inside the road; four-player framing remains unchanged. */
+    /** Keep every runner and obstacle on the same projected ground plane. */
     surface: (metres: number, lane: number, across = 0) =>
       project(metres, (lane * laneSpacing - (laneCount - 1) * laneSpacing / 2 + across * laneScale) * 0.26),
   };

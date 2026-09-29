@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { readFile, realpath, mkdir } from "node:fs/promises";
+import { readFile, realpath, mkdir, copyFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
@@ -47,4 +47,8 @@ await build({
   css: { postcss: { plugins: [tailwind({ base: game })] } },
   build: { outDir, emptyOutDir: true, target: "chrome111", sourcemap: false },
 });
+await copyFile(path.join(game, "public/studio-buddy.png"), path.join(outDir, "studio-buddy.png"));
+await mkdir(path.join(outDir, "fonts"), { recursive: true });
+await copyFile(path.join(game, "app/fonts/PretendardVariable.ttf"), path.join(outDir, "fonts/PretendardVariable.ttf"));
+await copyFile(path.join(game, "app/fonts/OFL.txt"), path.join(outDir, "fonts/OFL.txt"));
 console.log("Offline Android game ready:", outDir);

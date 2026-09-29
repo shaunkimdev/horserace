@@ -1,5 +1,5 @@
-/* System fonts are bundled with Android, so first launch also works offline. */
-body { font-family: system-ui, -apple-system, "Noto Sans KR", sans-serif; }
+/* The shared stylesheet bundles Pretendard for the web and offline WebView. */
+body { font-family: var(--font-sans); }
 button, input { font-family: inherit; }
 @media (pointer: coarse) {
   .header-actions button, .borrow-row button, .color-palette button { min-height: 44px; }

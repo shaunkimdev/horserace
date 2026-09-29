@@ -1,0 +1,25 @@
+{
+  "date": "2026-09-30",
+  "website": "https://draw-derby.musicapp.workers.dev",
+  "version": "308bea74-1ab4-42d0-95fc-b65f5cf13b9c",
+  "previousVersion": "2f836374-523e-4059-8f6d-b4aede5bf97b",
+  "webBuild": "passed",
+  "typescript": "passed",
+  "eslint": "passed",
+  "gameTests": 43,
+  "localServerTests": 4,
+  "publicServerTests": 4,
+  "deployedAssetHashes": "match local build (CSS, page JS, WOFF2)",
+  "android": {
+    "version": "1.4.0",
+    "versionCode": 6,
+    "javaTests": 3,
+    "lintErrors": 0,
+    "lintWarnings": 7,
+    "offlineBundle": "passed",
+    "apk": "android-app/releases/DrawDerby-debug.apk",
+    "sha256": "3bc23badae0afdd35deca6e5f89786dc2db683e2a4f5376b958b741336df723b"
+  },
+  "browserVisualQA": "not performed",
+  "deviceUIQA": "not performed"
+}

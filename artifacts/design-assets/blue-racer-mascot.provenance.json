@@ -1,0 +1,15 @@
+{
+  "asset": "blue-racer-mascot.png",
+  "tool": "built-in image_gen.imagegen",
+  "generationCalls": 1,
+  "inputImages": [],
+  "editedAfterGeneration": false,
+  "sourcePath": "C:/Users/KYOUNGSU/.codex/generated_images/01a0e867-106f-7282-afe4-71848b635d84/exec-2644652d-9ccb-4848-9281-76b2872efe8a.png",
+  "savedPath": "C:/Users/KYOUNGSU/Desktop/workplace/horcerace/artifacts/design-assets/blue-racer-mascot.png",
+  "width": 1254,
+  "height": 1254,
+  "format": "PNG, 32bpp ARGB",
+  "cornerAlpha": 0,
+  "visualInspection": "Inspected saved image with view_image. Full cobalt-blue plush quadruped, orange feet, mint scarf, running toward right, transparent background, no text or logos.",
+  "prompt": "Use case: stylized-concept\nAsset type: Original standalone raster mascot illustration for a cute Korean drawing race game UI, displayed about 160px high in a right-sidebar coaching card on a white and cloud-blue interface.\nPrimary request: Create exactly one unique cute cobalt blue squishy imaginary quadruped racer. It has a rounded bean-shaped body, small rounded floppy ears, two tiny dark eyes, a friendly confident smile, four short apricot-orange feet, and a little mint scarf. Three-quarter view, running toward the right. Whole body visible.\nScene/backdrop: A genuinely transparent background, preserving alpha. No scenery. Subtle soft contact shadow only.\nStyle/medium: Premium editorial 3D toy appearance, a smooth plush/clay-like surface, charming, clean simple silhouette that remains recognizable at small size.\nComposition/framing: Square approximately 1024 by 1024 image. One centered mascot with generous clear space around it. No cropping of ears, feet, or scarf.\nLighting/mood: Soft diffused studio lighting and subtle shadows, friendly and quietly confident.\nColor palette: Cobalt blue body, apricot-orange feet, little mint scarf, tiny dark eyes.\nConstraints: Exactly one original character. No text, logos, UI, badges, pencil, extra props, watermark, or famous characters. Do not resemble any known brand mascot. Do not depict a reference horse. No reference images are provided."
+}
