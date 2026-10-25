@@ -5,6 +5,7 @@ export const ROOM_DEFAULT_CAPACITY = 4;
 export const ROOM_MIN_CAPACITY = 2;
 export const ROOM_MAX_CAPACITY = 8;
 export const ROOM_COUNTDOWN_MS = 4000;
+export const ROOM_TITLE_MAX_LENGTH = 15;
 
 export type RoomPlayer = {
   id: string;
@@ -38,6 +39,8 @@ export type Room = {
   capacity: number;
   trackId: TrackId;
   code: string;
+  title: string;
+  isPrivate: boolean;
   hostId: string;
   phase: 'lobby' | 'racing' | 'finished';
   players: RoomPlayer[];
@@ -58,3 +61,15 @@ export type RoomAction =
   | { action: 'leave' };
 
 export type RoomErrorResponse = { error: string };
+export type RoomSummary = {
+  code: string;
+  title: string;
+  hostName: string;
+  trackId: TrackId;
+  playerCount: number;
+  capacity: number;
+  isPrivate: boolean;
+  updatedAt: number;
+  expiresAt: number;
+};
+export type RoomListResponse = { rooms: RoomSummary[]; serverNow: number };

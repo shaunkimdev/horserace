@@ -154,6 +154,7 @@ public class GameSmokeTest {
         assertEquals("true", js("document.querySelector('.capacity-stepper button:last-child').disabled"));
         js("document.querySelector('.start-button').click()");
         await("document.querySelector('.stage-lobby')", 10000);
+        assertEquals("true", js("!!document.querySelector('.kakao-share-button')"));
         assertEquals("8", js("document.querySelectorAll('.player-card').length"));
         js("""
                 (async()=>{try{

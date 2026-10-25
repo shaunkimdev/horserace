@@ -17,6 +17,9 @@ import {
 } from "@/lib/game";
 import {
   ROOM_DEFAULT_CAPACITY,
+  ROOM_TITLE_MAX_LENGTH,
+  type RoomListResponse,
+  type RoomSummary,
   type Room,
   type RoomAction,
   type RoomResponse,
@@ -311,6 +314,15 @@ export default function Home({
     [name, setName] = useState(SAMPLE_ANIMALS[0].name),
     [color, setColor] = useState(COLORS[0]);
   const [mode, setMode] = useState<"solo" | "friends">("solo"),
+    [roomTitle, setRoomTitle] = useState(""),
+    [isPrivate, setIsPrivate] = useState(false),
+    [roomPassword, setRoomPassword] = useState(""),
+    [joinPassword, setJoinPassword] = useState(""),
+    [needJoinPassword, setNeedJoinPassword] = useState(false),
+    [openRooms, setOpenRooms] = useState<RoomSummary[]>([]),
+    [loadingRooms, setLoadingRooms] = useState(false),
+    [selectedPrivateRoom, setSelectedPrivateRoom] = useState(""),
+    [listPassword, setListPassword] = useState(""),
     [joinCode, setJoinCode] = useState(""),
     [room, setRoom] = useState<Room | null>(null),
     [session, setSession] = useState<Credentials | null>(null);
@@ -625,12 +637,43 @@ export default function Home({
     handle = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(handle);
   }, [stage, race, startedAt, isMultiplayerRace, beep]);
-  async function openRoom(join = false) {
+  const loadOpenRooms = useCallback(async () => {
+    if (offline) return;
+    setLoadingRooms(true);
+    try {
+      const response = await fetch("/api/rooms", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = (await response.json()) as RoomListResponse;
+      if (Array.isArray(data.rooms)) setOpenRooms(data.rooms);
+    } catch {
+      /* Ignore transient list fetch errors. */
+    } finally {
+      setLoadingRooms(false);
+    }
+  }, [offline]);
+  useEffect(() => {
+    if (offline || mode !== "friends" || stage !== "draw" || session) return;
+    const timer = setTimeout(() => {
+      void loadOpenRooms();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [offline, mode, stage, session, loadOpenRooms]);
+  async function openRoom(
+    join = false,
+    codeOverride?: string,
+    passwordOverride?: string,
+  ) {
     if (!stats.valid) {
       setError(stats.reason || "몸통과 다리를 그려주세요.");
       return;
     }
-    if (join && joinCode.length !== 6) {
+    const targetCode = codeOverride ?? joinCode;
+    const targetPassword = passwordOverride ?? (joinPassword || undefined);
+    if (!join && isPrivate && !/^\d{4}$/.test(roomPassword)) {
+      setError("비공개 방은 숫자 4자리 비밀번호를 입력해 주세요.");
+      return;
+    }
+    if (join && targetCode.length !== 6) {
       setError("6자리 방 코드를 입력해 주세요.");
       return;
     }
@@ -645,12 +688,29 @@ export default function Home({
         body: JSON.stringify({
           name: animal.name,
           animal,
-          ...(!join ? { trackId, capacity } : {}),
-          ...(join ? { code: joinCode } : {}),
+          ...(!join
+            ? {
+                trackId,
+                capacity,
+                ...(roomTitle.trim() ? { title: roomTitle.trim() } : {}),
+                isPrivate,
+                ...(isPrivate ? { password: roomPassword } : {}),
+              }
+            : {}),
+          ...(join
+            ? {
+                code: targetCode,
+                ...(targetPassword ? { password: targetPassword } : {}),
+              }
+            : {}),
         }),
       });
       const data = (await response.json()) as RoomSession & { error?: string };
-      if (!response.ok) throw new Error(data.error || "방을 열지 못했어요.");
+      if (!response.ok) {
+        if (join && response.status === 403 && !codeOverride)
+          setNeedJoinPassword(true);
+        throw new Error(data.error || "방을 열지 못했어요.");
+      }
       remember(data);
       applyRoom(data, sentAt);
       if (!data.room.race) setStage("lobby");
@@ -721,6 +781,64 @@ export default function Home({
     } catch {
       setNotice(`방 코드 ${room.code}를 친구에게 알려주세요.`);
     }
+  }
+  async function shareKakao() {
+    if (!room) return;
+    const url = `${window.location.origin}/?room=${room.code}`;
+    const text = `[드로우 더비] 내가 그린 동물로 함께 달려요!\n초대 코드: ${room.code}\n바로 참가하기: ${url}`;
+    const bridge = (
+      window as Window & {
+        DrawDerbyScreen?: { postMessage: (msg: string) => void };
+      }
+    ).DrawDerbyScreen;
+    if (bridge) {
+      try {
+        await navigator.clipboard?.writeText(text);
+      } catch {
+        /* Clipboard is optional when launching the native intent. */
+      }
+      bridge.postMessage(`kakao:${room.code}`);
+      setNotice("카카오톡 공유 창을 열었어요.");
+      return;
+    }
+    if ((window as Window & { derbyNativeKakao?: boolean }).derbyNativeKakao) {
+      window.location.assign(
+        `drawderby://kakao?code=${encodeURIComponent(room.code)}`,
+      );
+      setNotice("카카오톡 공유 창을 열었어요.");
+      return;
+    }
+    let copied = false;
+    try {
+      await navigator.clipboard?.writeText(text);
+      copied = true;
+    } catch {
+      /* Clipboard may be restricted in some browsers. */
+    }
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({
+          title: "드로우 더비 · 친구와 경주",
+          text: `[드로우 더비] 내가 그린 동물로 함께 달려요!\n초대 코드: ${room.code}`,
+          url,
+        });
+        setNotice("카카오톡으로 초대 코드를 공유해 보세요!");
+        return;
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") {
+          if (copied)
+            setNotice(
+              "카카오톡 초대 메시지를 복사했어요. 대화방에 붙여넣어 보내주세요!",
+            );
+          return;
+        }
+      }
+    }
+    setNotice(
+      copied
+        ? "카카오톡 초대 메시지를 복사했어요. 대화방에 붙여넣어 보내주세요!"
+        : `방 코드 ${room.code}를 카카오톡으로 친구에게 알려주세요.`,
+    );
   }
   const frame = race ? sampleRace(race, Math.max(0, elapsed)) : null,
     standings = frame?.racers.slice().sort((a, b) => a.place - b.place) || [],
@@ -957,6 +1075,81 @@ export default function Home({
                       aria-label="선수 이름"
                     />
                   </label>
+                  {mode === "friends" && !session && (
+                    <div className="room-create-options">
+                      <label className="name-field">
+                        <span>
+                          방 제목 <small>최대 {ROOM_TITLE_MAX_LENGTH}자</small>
+                        </span>
+                        <input
+                          value={roomTitle}
+                          onChange={(e) =>
+                            setRoomTitle(
+                              e.target.value.slice(0, ROOM_TITLE_MAX_LENGTH),
+                            )
+                          }
+                          maxLength={ROOM_TITLE_MAX_LENGTH}
+                          placeholder={`${animal.name.slice(0, ROOM_TITLE_MAX_LENGTH - 5)}의 달리기방`}
+                          aria-label="방 제목"
+                        />
+                      </label>
+                      <div className="room-privacy-field">
+                        <span className="field-caption">방 공개 설정</span>
+                        <div
+                          className="privacy-tabs"
+                          role="group"
+                          aria-label="방 공개 설정"
+                        >
+                          <button
+                            type="button"
+                            className={!isPrivate ? "active" : ""}
+                            aria-pressed={!isPrivate}
+                            onClick={() => {
+                              setIsPrivate(false);
+                              setError("");
+                            }}
+                            disabled={busy}
+                          >
+                            공개방 <small>누구나 입장</small>
+                          </button>
+                          <button
+                            type="button"
+                            className={isPrivate ? "active" : ""}
+                            aria-pressed={isPrivate}
+                            onClick={() => {
+                              setIsPrivate(true);
+                              setError("");
+                            }}
+                            disabled={busy}
+                          >
+                            <StudioIcon name="lock" /> 비공개방{" "}
+                            <small>비밀번호 4자리</small>
+                          </button>
+                        </div>
+                      </div>
+                      {isPrivate && (
+                        <label className="name-field">
+                          <span>
+                            비공개 방 비밀번호 <small>숫자 4자리</small>
+                          </span>
+                          <input
+                            type="password"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={4}
+                            value={roomPassword}
+                            onChange={(e) =>
+                              setRoomPassword(
+                                e.target.value.replace(/\D/g, "").slice(0, 4),
+                              )
+                            }
+                            placeholder="숫자 4자리 입력 (예: 1234)"
+                            aria-label="비공개 방 비밀번호 4자리"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
                   <div className="race-mode">
                     <span className="field-caption">플레이 방식</span>
                     <div
@@ -1026,6 +1219,33 @@ export default function Home({
                       <b>초대 코드가 있나요?</b>
                       <span>같은 코드로 함께 모여요.</span>
                     </div>
+                    {(needJoinPassword || joinPassword.length > 0) && (
+                      <div className="join-password-row">
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={4}
+                          value={joinPassword}
+                          onChange={(e) =>
+                            setJoinPassword(
+                              e.target.value.replace(/\D/g, "").slice(0, 4),
+                            )
+                          }
+                          placeholder="비공개 방 비밀번호 숫자 4자리"
+                          aria-label="초대 코드 비공개 방 비밀번호 4자리"
+                        />
+                      </div>
+                    )}
+                    {!needJoinPassword && !joinPassword && (
+                      <button
+                        type="button"
+                        className="join-password-toggle"
+                        onClick={() => setNeedJoinPassword(true)}
+                      >
+                        <StudioIcon name="lock" /> 비공개 방 비밀번호 함께 입력
+                      </button>
+                    )}
                     <div className="join-input">
                       <input
                         aria-label="6자리 방 코드"
@@ -1050,6 +1270,125 @@ export default function Home({
                   </form>
                 )}
 
+                {mode === "friends" && !session && (
+                  <div className="open-rooms-panel" aria-label="열린 대기방 목록">
+                    <div className="open-rooms-header">
+                      <div>
+                        <b>열린 대기방</b>
+                        <span>방을 눌러 바로 함께 달려요.</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="refresh-rooms-button"
+                        onClick={() => void loadOpenRooms()}
+                        disabled={loadingRooms || busy}
+                        aria-label="열린 대기방 목록 새로고침"
+                      >
+                        <StudioIcon name="refresh" />
+                        <span>{loadingRooms ? "갱신 중…" : "새로고침"}</span>
+                      </button>
+                    </div>
+                    {openRooms.length === 0 ? (
+                      <p className="open-rooms-empty">
+                        {loadingRooms
+                          ? "열린 대기방을 불러오고 있어요…"
+                          : "지금 열려 있는 대기방이 없어요. 첫 방을 만들어 보세요!"}
+                      </p>
+                    ) : (
+                      <ul className="open-rooms-list">
+                        {openRooms.map((item) => (
+                          <li key={item.code} className="open-room-item">
+                            <div className="open-room-row">
+                              <div className="open-room-info">
+                                <div className="open-room-title-row">
+                                  <strong>{item.title}</strong>
+                                  <span
+                                    className={`room-visibility-badge ${item.isPrivate ? "is-private" : "is-public"}`}
+                                  >
+                                    {item.isPrivate ? (
+                                      <>
+                                        <StudioIcon name="lock" /> 비공개
+                                      </>
+                                    ) : (
+                                      "공개"
+                                    )}
+                                  </span>
+                                </div>
+                                <small>
+                                  방장 {item.hostName} ·{" "}
+                                  {getTrack(item.trackId).name} ·{" "}
+                                  <b>
+                                    {item.playerCount}/{item.capacity}명
+                                  </b>
+                                </small>
+                              </div>
+                              <button
+                                type="button"
+                                className="button outline open-room-join"
+                                disabled={busy || !stats.valid}
+                                onClick={() => {
+                                  if (!item.isPrivate) {
+                                    void openRoom(true, item.code);
+                                    return;
+                                  }
+                                  if (selectedPrivateRoom === item.code) {
+                                    setSelectedPrivateRoom("");
+                                    setListPassword("");
+                                  } else {
+                                    setSelectedPrivateRoom(item.code);
+                                    setListPassword("");
+                                    setError("");
+                                  }
+                                }}
+                              >
+                                {item.isPrivate ? "비밀번호 입장" : "바로 입장"}
+                              </button>
+                            </div>
+                            {item.isPrivate &&
+                              selectedPrivateRoom === item.code && (
+                                <div className="open-room-password">
+                                  <input
+                                    type="password"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
+                                    maxLength={4}
+                                    value={listPassword}
+                                    onChange={(e) =>
+                                      setListPassword(
+                                        e.target.value
+                                          .replace(/\D/g, "")
+                                          .slice(0, 4),
+                                      )
+                                    }
+                                    placeholder="비밀번호 숫자 4자리"
+                                    aria-label={`${item.title} 비밀번호 4자리`}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="button dark"
+                                    disabled={
+                                      busy ||
+                                      listPassword.length !== 4 ||
+                                      !stats.valid
+                                    }
+                                    onClick={() =>
+                                      void openRoom(
+                                        true,
+                                        item.code,
+                                        listPassword,
+                                      )
+                                    }
+                                  >
+                                    입장하기
+                                  </button>
+                                </div>
+                              )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
                 <div className="selected-course">
                   <StudioIcon name="flag" />
                   <div>
@@ -1126,8 +1465,34 @@ export default function Home({
           </div>
           <div className="lobby-title">
             <div>
-              <h1>우리의 출발선</h1>
+              <div className="lobby-heading-badges">
+                <span
+                  className={`room-visibility-badge ${room?.isPrivate ? "is-private" : "is-public"}`}
+                >
+                  {room?.isPrivate ? (
+                    <>
+                      <StudioIcon name="lock" /> 비공개방
+                    </>
+                  ) : (
+                    "공개방"
+                  )}
+                </span>
+              </div>
+              <h1>{room?.title || "우리의 출발선"}</h1>
               <p>각자의 낙서로, 하나의 출발선에. 모두 준비되면 출발합니다.</p>
+            </div>
+            <div className="lobby-invite">
+              {room && (
+                <button
+                  type="button"
+                  className="kakao-share-button"
+                  onClick={() => void shareKakao()}
+                  aria-label={`방 코드 ${room.code}, 카카오톡으로 보내기`}
+                >
+                  <StudioIcon name="kakao" />
+                  <span>카카오톡으로 보내기</span>
+                </button>
+              )}
             </div>
             {room && (
               <button

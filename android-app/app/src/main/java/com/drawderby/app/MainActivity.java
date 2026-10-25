@@ -290,6 +290,7 @@ public class MainActivity extends Activity {
                     if (!isMainFrame || !isGameUrl(sourceOrigin.toString()) || !isGameUrl(view.getUrl())) return;
                     String mode = message.getData();
                     if ("race".equals(mode) || "normal".equals(mode)) setRaceScreen("race".equals(mode));
+                    else if (mode != null && mode.startsWith("kakao:")) shareToKakao(mode.substring(6), view.getUrl());
                 });
         screenBridgeInstalled = true;
     }
@@ -302,18 +303,55 @@ public class MainActivity extends Activity {
                   if(!root){if(++attempts<200)setTimeout(attach,50);return}
                   if(window.derbyScreenObserver)window.derbyScreenObserver.disconnect();
                   let previous;
+                  function ensureKakaoButton(){
+                    const roomCode=document.querySelector('.lobby-title .room-code');
+                    if(!roomCode||document.querySelector('.kakao-share-button'))return;
+                    const code=(roomCode.querySelector('strong')?.textContent||'').trim();
+                    if(!/^[A-Z0-9]{6}$/.test(code))return;
+                    const btn=document.createElement('button');
+                    btn.type='button';
+                    btn.className='kakao-share-button';
+                    btn.setAttribute('aria-label','방 코드 '+code+', 카카오톡으로 보내기');
+                    btn.style.cssText='display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:54px;padding:14px 20px;border:1px solid #e5ce00;border-radius:18px;background:#fee500;color:#191919;box-shadow:0 4px 0 #dec500;font-size:14px;font-weight:750;white-space:nowrap;';
+                    btn.innerHTML='<svg class="studio-icon" style="width:19px;height:19px;fill:currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4c-5 0-9 3.1-9 7 0 2.5 1.7 4.7 4.3 5.9L6.3 20l3.7-2.1c.6.1 1.3.1 2 .1 5 0 9-3.1 9-7s-4-7-9-7Z"/></svg><span>카카오톡으로 보내기</span>';
+                    btn.onclick=()=>{if(window.DrawDerbyScreen)window.DrawDerbyScreen.postMessage('kakao:'+code);else location.href='drawderby://kakao?code='+encodeURIComponent(code)};
+                    roomCode.insertAdjacentElement('afterend',btn);
+                  }
                   function update(){
+                    ensureKakaoButton();
                     const mode=root.classList.contains('stage-race')?'race':'normal';
                     if(mode===previous)return;previous=mode;
                     if(mode==='race')window.scrollTo(0,0);
                     if(window.DrawDerbyScreen)window.DrawDerbyScreen.postMessage(mode);
                     else location.href='drawderby://screen/'+mode;
                   }
+                  window.derbyNativeKakao=true;
                   window.derbyScreenObserver=new MutationObserver(update);
-                  window.derbyScreenObserver.observe(root,{attributes:true,attributeFilter:['class']});
+                  window.derbyScreenObserver.observe(root,{attributes:true,attributeFilter:['class'],childList:true,subtree:true});
                   update();
                 }attach()})()
                 """, null);
+    }
+
+    private void shareToKakao(String rawCode, String pageUrl) {
+        String code = rawCode == null ? "" : rawCode.trim().toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+        if (code.length() != 6) return;
+        String origin = ServerAddress.sameOrigin(pageUrl, serverOrigin) ? serverOrigin : ServerAddress.DEFAULT_ORIGIN;
+        String inviteUrl = origin + "/?room=" + code;
+        String text = "[드로우 더비] 내가 그린 동물로 함께 달려요!\n초대 코드: " + code + "\n바로 참가하기: " + inviteUrl;
+        android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("드로우 더비 초대 코드", text));
+        }
+        Intent kakao = new Intent(Intent.ACTION_SEND);
+        kakao.setType("text/plain");
+        kakao.setPackage("com.kakao.talk");
+        kakao.putExtra(Intent.EXTRA_TEXT, text);
+        try {
+            startActivity(kakao);
+        } catch (ActivityNotFoundException ignored) {
+            Toast.makeText(this, "카카오톡이 설치되어 있지 않아 초대 메시지를 복사했어요.", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void setRaceScreen(boolean racing) {
@@ -444,6 +482,12 @@ public class MainActivity extends Activity {
             }
             if (url.equals("drawderby://connect") && ServerAddress.sameOrigin(view.getUrl(), OFFLINE_ORIGIN)) {
                 openMultiplayer();
+                return true;
+            }
+            if (request.isForMainFrame() && isGameUrl(view.getUrl())
+                    && "drawderby".equals(request.getUrl().getScheme())
+                    && "kakao".equals(request.getUrl().getHost())) {
+                shareToKakao(request.getUrl().getQueryParameter("code"), view.getUrl());
                 return true;
             }
             if (isGameUrl(url)) return false;

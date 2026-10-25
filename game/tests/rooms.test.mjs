@@ -142,6 +142,57 @@ test("capacity defaults to four, persists across upgrades, and only the host can
   assert.equal(state.record.room.capacity, 2);
 });
 
+test("rooms support custom titles up to 15 chars, private 4-digit passwords, and open lobby summaries", () => {
+  const pub = new RoomState(null, 1_900_000_000_000);
+  pub.create("ABC234", profile(0), "host");
+  assert.equal(pub.record.room.title, "Player 0의 달리기방");
+  assert.equal(pub.record.room.isPrivate, false);
+  assert.equal(pub.summary().playerCount, 1);
+  assert.throws(
+    () =>
+      new RoomState(null, Date.now()).create(
+        "ABC234",
+        { ...profile(0), title: "가".repeat(16) },
+        "host",
+      ),
+    status(400),
+  );
+  for (const badPin of ["", "123", "12345", "12ab", null]) {
+    assert.throws(
+      () =>
+        new RoomState(null, Date.now()).create(
+          "ABC234",
+          { ...profile(0), isPrivate: true, password: badPin },
+          "host",
+        ),
+      status(400),
+    );
+  }
+  const priv = new RoomState(null, 1_900_000_000_000);
+  priv.create(
+    "DEF567",
+    {
+      ...profile(0),
+      title: "우리반 비밀경주",
+      isPrivate: true,
+      password: "4829",
+      capacity: 2,
+    },
+    "host",
+  );
+  assert.equal(priv.summary().title, "우리반 비밀경주");
+  assert.equal(priv.summary().isPrivate, true);
+  assert.ok(!JSON.stringify(priv.snapshot(connected(priv))).includes("4829"));
+  assert.ok(!JSON.stringify(priv.snapshot(connected(priv))).includes("pin"));
+  assert.throws(() => priv.join(profile(1), "guest"), status(403));
+  assert.throws(
+    () => priv.join({ ...profile(1), password: "0000" }, "guest"),
+    status(403),
+  );
+  priv.join({ ...profile(1), password: "4829" }, "guest");
+  assert.equal(priv.summary(), null);
+});
+
 test("quiet sockets stay present; disconnection transfers host and removes absent players on deadlines", () => {
   const now = 1_900_000_000_000;
   const state = new RoomState(null, now);

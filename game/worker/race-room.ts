@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { RoomState, type RoomRecord } from "../lib/room-state";
+import type { RoomSummary } from "../lib/rooms";
 import {
   hashToken,
   MAX_ROOM_BODY_BYTES,
@@ -91,11 +92,61 @@ export class RaceRoom extends DurableObject {
     else if ((await this.ctx.storage.getAlarm()) !== alarm)
       await this.ctx.storage.setAlarm(alarm);
     afterCommit?.(state);
-    if (changed) this.broadcast(state);
+    if (changed) {
+      const code = state.record?.room.code ?? previous?.room.code;
+      if (code && this.env?.RACE_ROOMS) {
+        try {
+          await this.env.RACE_ROOMS.get(
+            this.env.RACE_ROOMS.idFromName("__DIRECTORY__"),
+          ).fetch("https://room.internal/directory", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code, summary: state.summary() }),
+          });
+        } catch {
+          /* Directory sync is best-effort. */
+        }
+      }
+      this.broadcast(state);
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/directory") {
+      return roomResponse(async () => {
+        const now = Date.now();
+        const directory =
+          (await this.ctx.storage.get<Record<string, RoomSummary>>(
+            "directory",
+          )) ?? {};
+        let mutated = false;
+        for (const [key, item] of Object.entries(directory)) {
+          if (!item || item.expiresAt <= now) {
+            delete directory[key];
+            mutated = true;
+          }
+        }
+        if (request.method === "POST") {
+          const payload = (await request.json()) as {
+            code?: string;
+            summary?: RoomSummary | null;
+          };
+          if (payload.code) {
+            if (payload.summary) directory[payload.code] = payload.summary;
+            else delete directory[payload.code];
+            mutated = true;
+          }
+          if (mutated) await this.ctx.storage.put("directory", directory);
+          return { ok: true };
+        }
+        if (mutated) await this.ctx.storage.put("directory", directory);
+        const rooms = Object.values(directory)
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .slice(0, 30);
+        return { rooms, serverNow: now };
+      });
+    }
     if (url.pathname === "/socket") {
       try {
         if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket")
