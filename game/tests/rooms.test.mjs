@@ -508,3 +508,54 @@ test("persisted room and credentials survive a Worker restart", async () => {
   assert.equal(snapshot.room.players[0].ready, true);
   reconnected.ws.close();
 });
+
+test("directory endpoint lists created public and private rooms on refresh without exposing PINs", async () => {
+  const pub = await request("/api/rooms", {
+    ...profile(0),
+    title: "공개 달리기방",
+    isPrivate: false,
+  });
+  assert.equal(pub.status, 201);
+  const priv = await request("/api/rooms", {
+    ...profile(1),
+    title: "비밀 달리기방",
+    isPrivate: true,
+    password: "2580",
+    capacity: 2,
+  });
+  assert.equal(priv.status, 201);
+  const listed = await request("/api/rooms");
+  assert.equal(listed.status, 200);
+  const pubItem = listed.data.rooms.find((r) => r.code === pub.data.room.code);
+  const privItem = listed.data.rooms.find(
+    (r) => r.code === priv.data.room.code,
+  );
+  assert.ok(pubItem);
+  assert.equal(pubItem.title, "공개 달리기방");
+  assert.equal(pubItem.isPrivate, false);
+  assert.ok(privItem);
+  assert.equal(privItem.title, "비밀 달리기방");
+  assert.equal(privItem.isPrivate, true);
+  assert.ok(!JSON.stringify(listed.data).includes("2580"));
+  assert.equal(
+    (
+      await request("/api/rooms/join", {
+        code: priv.data.room.code,
+        ...profile(2),
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request("/api/rooms/join", {
+        code: priv.data.room.code,
+        ...profile(2),
+        password: "2580",
+      })
+    ).status,
+    200,
+  );
+  const afterFull = await request("/api/rooms");
+  assert.ok(!afterFull.data.rooms.some((r) => r.code === priv.data.room.code));
+});

@@ -135,7 +135,7 @@ export default function TrackPicker({
             {lobby ? "이번 경주의 코스" : "러너에게 어울리는 길"}
           </span>
           <h2>
-            {!lobby && <span className="step-number">03</span>} 트랙 고르기
+            <span className="step-number">{lobby ? "02" : "03"}</span> 트랙 고르기
           </h2>
         </div>
         <p>
