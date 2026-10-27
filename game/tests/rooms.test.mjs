@@ -142,6 +142,57 @@ test("capacity defaults to four, persists across upgrades, and only the host can
   assert.equal(state.record.room.capacity, 2);
 });
 
+test("rooms support custom titles up to 15 chars, private 4-digit passwords, and open lobby summaries", () => {
+  const pub = new RoomState(null, 1_900_000_000_000);
+  pub.create("ABC234", profile(0), "host");
+  assert.equal(pub.record.room.title, "Player 0의 달리기방");
+  assert.equal(pub.record.room.isPrivate, false);
+  assert.equal(pub.summary().playerCount, 1);
+  assert.throws(
+    () =>
+      new RoomState(null, Date.now()).create(
+        "ABC234",
+        { ...profile(0), title: "가".repeat(16) },
+        "host",
+      ),
+    status(400),
+  );
+  for (const badPin of ["", "123", "12345", "12ab", null]) {
+    assert.throws(
+      () =>
+        new RoomState(null, Date.now()).create(
+          "ABC234",
+          { ...profile(0), isPrivate: true, password: badPin },
+          "host",
+        ),
+      status(400),
+    );
+  }
+  const priv = new RoomState(null, 1_900_000_000_000);
+  priv.create(
+    "DEF567",
+    {
+      ...profile(0),
+      title: "우리반 비밀경주",
+      isPrivate: true,
+      password: "4829",
+      capacity: 2,
+    },
+    "host",
+  );
+  assert.equal(priv.summary().title, "우리반 비밀경주");
+  assert.equal(priv.summary().isPrivate, true);
+  assert.ok(!JSON.stringify(priv.snapshot(connected(priv))).includes("4829"));
+  assert.ok(!JSON.stringify(priv.snapshot(connected(priv))).includes("pin"));
+  assert.throws(() => priv.join(profile(1), "guest"), status(403));
+  assert.throws(
+    () => priv.join({ ...profile(1), password: "0000" }, "guest"),
+    status(403),
+  );
+  priv.join({ ...profile(1), password: "4829" }, "guest");
+  assert.equal(priv.summary(), null);
+});
+
 test("quiet sockets stay present; disconnection transfers host and removes absent players on deadlines", () => {
   const now = 1_900_000_000_000;
   const state = new RoomState(null, now);
@@ -456,4 +507,55 @@ test("persisted room and credentials survive a Worker restart", async () => {
   assert.equal(snapshot.room.players[0].id, host.playerId);
   assert.equal(snapshot.room.players[0].ready, true);
   reconnected.ws.close();
+});
+
+test("directory endpoint lists created public and private rooms on refresh without exposing PINs", async () => {
+  const pub = await request("/api/rooms", {
+    ...profile(0),
+    title: "공개 달리기방",
+    isPrivate: false,
+  });
+  assert.equal(pub.status, 201);
+  const priv = await request("/api/rooms", {
+    ...profile(1),
+    title: "비밀 달리기방",
+    isPrivate: true,
+    password: "2580",
+    capacity: 2,
+  });
+  assert.equal(priv.status, 201);
+  const listed = await request("/api/rooms");
+  assert.equal(listed.status, 200);
+  const pubItem = listed.data.rooms.find((r) => r.code === pub.data.room.code);
+  const privItem = listed.data.rooms.find(
+    (r) => r.code === priv.data.room.code,
+  );
+  assert.ok(pubItem);
+  assert.equal(pubItem.title, "공개 달리기방");
+  assert.equal(pubItem.isPrivate, false);
+  assert.ok(privItem);
+  assert.equal(privItem.title, "비밀 달리기방");
+  assert.equal(privItem.isPrivate, true);
+  assert.ok(!JSON.stringify(listed.data).includes("2580"));
+  assert.equal(
+    (
+      await request("/api/rooms/join", {
+        code: priv.data.room.code,
+        ...profile(2),
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request("/api/rooms/join", {
+        code: priv.data.room.code,
+        ...profile(2),
+        password: "2580",
+      })
+    ).status,
+    200,
+  );
+  const afterFull = await request("/api/rooms");
+  assert.ok(!afterFull.data.rooms.some((r) => r.code === priv.data.room.code));
 });

@@ -10,7 +10,10 @@ type IconName =
   | "play"
   | "help"
   | "close"
-  | "shield";
+  | "shield"
+  | "kakao"
+  | "lock"
+  | "refresh";
 
 const paths: Record<IconName, string> = {
   pencil: "m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15v5Z",
@@ -26,6 +29,10 @@ const paths: Record<IconName, string> = {
   help: "M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4m0 4h.01M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0Z",
   close: "m6 6 12 12M6 18 18 6",
   shield: "m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Zm-4 9 3 3 5-6",
+  kakao:
+    "M12 4c-5 0-9 3.1-9 7 0 2.5 1.7 4.7 4.3 5.9L6.3 20l3.7-2.1c.6.1 1.3.1 2 .1 5 0 9-3.1 9-7s-4-7-9-7Z",
+  lock: "M7 11V8a5 5 0 0 1 10 0v3m-11 0h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Zm6 4v2",
+  refresh: "M21 12a9 9 0 1 1-2.6-6.4L21 8m0-5v5h-5",
 };
 
 export default function StudioIcon({

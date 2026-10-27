@@ -1,5 +1,5 @@
 import { analyzeAnimal, type Animal, type Stroke } from "./game";
-import { ROOM_MIN_CAPACITY, ROOM_MAX_CAPACITY } from "./rooms";
+import { ROOM_MIN_CAPACITY, ROOM_MAX_CAPACITY, ROOM_TITLE_MAX_LENGTH } from "./rooms";
 export const MAX_ROOM_BODY_BYTES = 180_000;
 export class RoomError extends Error {
   constructor(
@@ -134,6 +134,34 @@ export function roomCapacity(value: unknown): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < ROOM_MIN_CAPACITY || value > ROOM_MAX_CAPACITY)
     throw new RoomError(400, "방 정원은 2~8명으로 설정해 주세요.");
   return value;
+}
+export function roomTitle(value: unknown, hostName: string): string {
+  const defaultTitle = `${hostName.slice(0, ROOM_TITLE_MAX_LENGTH - 5)}의 달리기방`;
+  if (value === undefined || (typeof value === "string" && !value.trim()))
+    return defaultTitle;
+  if (typeof value !== "string")
+    throw new RoomError(
+      400,
+      `방 제목을 1~${ROOM_TITLE_MAX_LENGTH}자로 입력해 주세요.`,
+    );
+  const clean = Array.from(value)
+    .filter(
+      (character) =>
+        character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127,
+    )
+    .join("")
+    .trim();
+  if (!clean || clean.length > ROOM_TITLE_MAX_LENGTH)
+    throw new RoomError(
+      400,
+      `방 제목을 1~${ROOM_TITLE_MAX_LENGTH}자로 입력해 주세요.`,
+    );
+  return clean;
+}
+export function roomPassword(value: unknown): string {
+  if (typeof value !== "string" || !/^\d{4}$/.test(value.trim()))
+    throw new RoomError(400, "비공개 방은 숫자 4자리 비밀번호를 입력해 주세요.");
+  return value.trim();
 }
 export function playerName(value: unknown): string {
   return name(value);

@@ -6,11 +6,14 @@ import {
   type Room,
   type RoomPlayer,
   type RoomResponse,
+  type RoomSummary,
 } from "./rooms";
 import {
   inputObject,
   playerName,
   roomCapacity,
+  roomPassword,
+  roomTitle,
   RoomError,
   sanitizeAnimal,
   secret,
@@ -23,7 +26,10 @@ type StoredPlayer = Omit<RoomPlayer, "connected"> & {
   tokenHash: string;
   disconnectedAt: number | null;
 };
-export type StoredRoom = Omit<Room, "players"> & { players: StoredPlayer[] };
+export type StoredRoom = Omit<Room, "players"> & {
+  players: StoredPlayer[];
+  pin: string | null;
+};
 export type RoomRecord = { room: StoredRoom; revision: number };
 
 /** Pure rules. The Durable Object serializes and persists each successful change. */
@@ -33,7 +39,12 @@ export class RoomState {
     private now: number,
   ) {
     // Rooms persisted before adjustable capacity keep their original four seats.
-    if (record) record.room.capacity ??= ROOM_DEFAULT_CAPACITY;
+    if (record) {
+      record.room.capacity ??= ROOM_DEFAULT_CAPACITY;
+      record.room.title ??= `${(record.room.players[0]?.name || "선수").slice(0, 10)}의 달리기방`;
+      record.room.isPrivate ??= false;
+      record.room.pin ??= null;
+    }
   }
 
   requireRoom(): StoredRoom {
@@ -62,6 +73,10 @@ export class RoomState {
     const body = inputObject(value);
     const capacity = roomCapacity(body.capacity === undefined ? ROOM_DEFAULT_CAPACITY : body.capacity);
     const trackId = body.trackId ?? DEFAULT_TRACK;
+    const hostName = playerName(body.name);
+    const title = roomTitle(body.title, hostName);
+    const isPrivate = Boolean(body.isPrivate);
+    const pin = isPrivate ? roomPassword(body.password) : null;
     if (!isTrackId(trackId))
       throw new RoomError(400, "선택한 트랙을 확인해 주세요.");
     this.record = {
@@ -69,6 +84,9 @@ export class RoomState {
       room: {
         capacity,
         code,
+        title,
+        isPrivate,
+        pin,
         trackId,
         hostId: "",
         phase: "lobby",
@@ -95,6 +113,10 @@ export class RoomState {
         `이 방은 가득 찼습니다. 정원은 ${room.capacity}명이에요.`,
       );
     const body = inputObject(value);
+    if (room.players.length > 0 && room.isPrivate && room.pin) {
+      if (typeof body.password !== "string" || body.password.trim() !== room.pin)
+        throw new RoomError(403, "비공개 방 비밀번호 4자리를 확인해 주세요.");
+    }
     const name = playerName(body.name);
     const animal = body.animal == null ? null : sanitizeAnimal(body.animal);
     const id = secret(12);
@@ -265,13 +287,41 @@ export class RoomState {
     room.expiresAt = this.now + ROOM_TTL_MS;
   }
 
+  summary(): RoomSummary | null {
+    if (!this.record) return null;
+    const room = this.record.room;
+    if (
+      room.phase !== "lobby" ||
+      !room.players.length ||
+      room.players.length >= room.capacity ||
+      this.now >= room.expiresAt
+    )
+      return null;
+    const host =
+      room.players.find((p) => p.id === room.hostId) || room.players[0];
+    return {
+      code: room.code,
+      title: room.title,
+      hostName: host.name,
+      trackId: room.trackId,
+      playerCount: room.players.length,
+      capacity: room.capacity,
+      isPrivate: room.isPrivate,
+      updatedAt: this.now,
+      expiresAt: room.expiresAt,
+    };
+  }
+
   snapshot(connected: ReadonlySet<string>): RoomResponse {
     const room = this.requireRoom();
     return {
       revision: this.record!.revision,
       serverNow: this.now,
       room: {
-        ...room,
+        ...(({ pin, ...publicRoom }) => {
+          void pin;
+          return publicRoom;
+        })(room),
         players: room.players.map(({ id, name, color, animal, ready }) => ({
           id,
           name,

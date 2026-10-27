@@ -33,6 +33,9 @@ export async function routeRoomRequest(
       });
       return env.RACE_ROOMS.get(env.RACE_ROOMS.idFromName(code)).fetch(next);
     };
+    if (url.pathname === "/api/rooms" && request.method === "GET") {
+      return forward("__DIRECTORY__", "/directory");
+    }
     if (url.pathname === "/api/rooms" && request.method === "POST") {
       const body = await readRoomBody(request);
       for (let attempt = 0; attempt < 12; attempt++) {

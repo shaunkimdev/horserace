@@ -17,6 +17,9 @@ import {
 } from "@/lib/game";
 import {
   ROOM_DEFAULT_CAPACITY,
+  ROOM_TITLE_MAX_LENGTH,
+  type RoomListResponse,
+  type RoomSummary,
   type Room,
   type RoomAction,
   type RoomResponse,
@@ -32,6 +35,7 @@ import ProductInfo from "@/components/ProductInfo";
 
 const COLORS = ["#22352b", "#16915b", "#3474e6", "#1195a3"];
 const COLOR_NAMES = ["먹색", "초록", "파랑", "청록"];
+const nowMs = () => Date.now();
 type Stage = "draw" | "lobby" | "race" | "results";
 type Credentials = { code: string; playerId: string; token: string };
 
@@ -311,6 +315,15 @@ export default function Home({
     [name, setName] = useState(SAMPLE_ANIMALS[0].name),
     [color, setColor] = useState(COLORS[0]);
   const [mode, setMode] = useState<"solo" | "friends">("solo"),
+    [roomTitle, setRoomTitle] = useState(""),
+    [isPrivate, setIsPrivate] = useState(false),
+    [roomPassword, setRoomPassword] = useState(""),
+    [joinPassword, setJoinPassword] = useState(""),
+    [needJoinPassword, setNeedJoinPassword] = useState(false),
+    [openRooms, setOpenRooms] = useState<RoomSummary[]>([]),
+    [loadingRooms, setLoadingRooms] = useState(false),
+    [selectedPrivateRoom, setSelectedPrivateRoom] = useState(""),
+    [listPassword, setListPassword] = useState(""),
     [joinCode, setJoinCode] = useState(""),
     [room, setRoom] = useState<Room | null>(null),
     [session, setSession] = useState<Credentials | null>(null);
@@ -625,32 +638,77 @@ export default function Home({
     handle = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(handle);
   }, [stage, race, startedAt, isMultiplayerRace, beep]);
-  async function openRoom(join = false) {
-    if (!stats.valid) {
-      setError(stats.reason || "몸통과 다리를 그려주세요.");
+  const loadOpenRooms = useCallback(async () => {
+    if (offline) return;
+    setLoadingRooms(true);
+    try {
+      const response = await fetch("/api/rooms", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = (await response.json()) as RoomListResponse;
+      if (Array.isArray(data.rooms)) setOpenRooms(data.rooms);
+    } catch {
+      /* Ignore transient list fetch errors. */
+    } finally {
+      setLoadingRooms(false);
+    }
+  }, [offline]);
+  useEffect(() => {
+    if (offline || mode !== "friends" || stage !== "draw" || session) return;
+    const timer = setTimeout(() => {
+      void loadOpenRooms();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [offline, mode, stage, session, loadOpenRooms]);
+  async function openRoom(
+    join = false,
+    codeOverride?: string,
+    passwordOverride?: string,
+  ) {
+    const entryAnimal = stats.valid ? animal : SAMPLE_ANIMALS[0];
+    const targetCode = codeOverride ?? joinCode;
+    const targetPassword = passwordOverride ?? (joinPassword || undefined);
+    if (!join && isPrivate && !/^\d{4}$/.test(roomPassword)) {
+      setError("비공개 방은 숫자 4자리 비밀번호를 입력해 주세요.");
       return;
     }
-    if (join && joinCode.length !== 6) {
+    if (join && targetCode.length !== 6) {
       setError("6자리 방 코드를 입력해 주세요.");
       return;
     }
     setBusy(true);
     setError("");
     beep();
-    const sentAt = Date.now();
+    const sentAt = nowMs();
     try {
       const response = await fetch(join ? "/api/rooms/join" : "/api/rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: animal.name,
-          animal,
-          ...(!join ? { trackId, capacity } : {}),
-          ...(join ? { code: joinCode } : {}),
+          name: entryAnimal.name,
+          animal: entryAnimal,
+          ...(!join
+            ? {
+                trackId,
+                capacity,
+                ...(roomTitle.trim() ? { title: roomTitle.trim() } : {}),
+                isPrivate,
+                ...(isPrivate ? { password: roomPassword } : {}),
+              }
+            : {}),
+          ...(join
+            ? {
+                code: targetCode,
+                ...(targetPassword ? { password: targetPassword } : {}),
+              }
+            : {}),
         }),
       });
       const data = (await response.json()) as RoomSession & { error?: string };
-      if (!response.ok) throw new Error(data.error || "방을 열지 못했어요.");
+      if (!response.ok) {
+        if (join && response.status === 403 && !codeOverride)
+          setNeedJoinPassword(true);
+        throw new Error(data.error || "방을 열지 못했어요.");
+      }
       remember(data);
       applyRoom(data, sentAt);
       if (!data.room.race) setStage("lobby");
@@ -667,7 +725,7 @@ export default function Home({
     setBusy(true);
     setError("");
     beep();
-    const sentAt = Date.now();
+    const sentAt = nowMs();
     try {
       if (!connection.current)
         throw new Error("서버에 연결하고 있어요. 잠시 후 시도해 주세요.");
@@ -678,8 +736,51 @@ export default function Home({
         setRace(null);
       } else {
         if ("room" in data) applyRoom(data, sentAt);
-        if (action.action === "animal") setStage("lobby");
+        if (action.action === "animal") {
+          setStage("lobby");
+          setNotice("내 선수를 대기방에 적용했어요!");
+        }
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "연결을 확인해 주세요.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveLobbyAnimal() {
+    if (!session || busy) return;
+    if (!stats.valid) {
+      setError(stats.reason || "몸통과 두 개 이상의 다리를 그려주세요.");
+      return;
+    }
+    await roomAction({ action: "animal", animal });
+  }
+  async function toggleLobbyReady() {
+    if (!session || busy) return;
+    const nextReady = !me?.ready;
+    if (nextReady && !stats.valid) {
+      setError(stats.reason || "몸통과 두 개 이상의 다리를 그려주세요.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    beep();
+    const sentAt = nowMs();
+    try {
+      if (!connection.current)
+        throw new Error("서버에 연결하고 있어요. 잠시 후 시도해 주세요.");
+      if (nextReady) {
+        const updated = await connection.current.action({
+          action: "animal",
+          animal,
+        });
+        if ("room" in updated) applyRoom(updated, sentAt);
+      }
+      const data = await connection.current.action({
+        action: "ready",
+        ready: nextReady,
+      });
+      if ("room" in data) applyRoom(data, sentAt);
     } catch (e) {
       setError(e instanceof Error ? e.message : "연결을 확인해 주세요.");
     } finally {
@@ -721,6 +822,64 @@ export default function Home({
     } catch {
       setNotice(`방 코드 ${room.code}를 친구에게 알려주세요.`);
     }
+  }
+  async function shareKakao() {
+    if (!room) return;
+    const url = `${window.location.origin}/?room=${room.code}`;
+    const text = `[드로우 더비] 내가 그린 동물로 함께 달려요!\n초대 코드: ${room.code}\n바로 참가하기: ${url}`;
+    const bridge = (
+      window as Window & {
+        DrawDerbyScreen?: { postMessage: (msg: string) => void };
+      }
+    ).DrawDerbyScreen;
+    if (bridge) {
+      try {
+        await navigator.clipboard?.writeText(text);
+      } catch {
+        /* Clipboard is optional when launching the native intent. */
+      }
+      bridge.postMessage(`kakao:${room.code}`);
+      setNotice("카카오톡 공유 창을 열었어요.");
+      return;
+    }
+    if ((window as Window & { derbyNativeKakao?: boolean }).derbyNativeKakao) {
+      window.location.assign(
+        `drawderby://kakao?code=${encodeURIComponent(room.code)}`,
+      );
+      setNotice("카카오톡 공유 창을 열었어요.");
+      return;
+    }
+    let copied = false;
+    try {
+      await navigator.clipboard?.writeText(text);
+      copied = true;
+    } catch {
+      /* Clipboard may be restricted in some browsers. */
+    }
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({
+          title: "드로우 더비 · 친구와 경주",
+          text: `[드로우 더비] 내가 그린 동물로 함께 달려요!\n초대 코드: ${room.code}`,
+          url,
+        });
+        setNotice("카카오톡으로 초대 코드를 공유해 보세요!");
+        return;
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") {
+          if (copied)
+            setNotice(
+              "카카오톡 초대 메시지를 복사했어요. 대화방에 붙여넣어 보내주세요!",
+            );
+          return;
+        }
+      }
+    }
+    setNotice(
+      copied
+        ? "카카오톡 초대 메시지를 복사했어요. 대화방에 붙여넣어 보내주세요!"
+        : `방 코드 ${room.code}를 카카오톡으로 친구에게 알려주세요.`,
+    );
   }
   const frame = race ? sampleRace(race, Math.max(0, elapsed)) : null,
     standings = frame?.racers.slice().sort((a, b) => a.place - b.place) || [],
@@ -823,121 +982,327 @@ export default function Home({
               <span className="eyebrow">
                 <span className="tiny-dot" /> 나만의 낙서 운동장
               </span>
-              <h1 id="studio-title">
-                오늘의 선수, <em>직접 그려볼까요?</em>
-              </h1>
-              <p>
-                다리 길이도, 몸통 모양도 자유롭게. 내가 그린 모습으로 달려요.
-              </p>
+              {mode === "friends" && !session ? (
+                <>
+                  <h1 id="studio-title">
+                    친구와 함께, <em>방부터 골라볼까요?</em>
+                  </h1>
+                  <p>
+                    열려 있는 방에 바로 들어가거나 새 방을 만들어 보세요. 선수
+                    만들기와 트랙 고르기는 방 안에서 진행해요.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h1 id="studio-title">
+                    오늘의 선수, <em>직접 그려볼까요?</em>
+                  </h1>
+                  <p>
+                    다리 길이도, 몸통 모양도 자유롭게. 내가 그린 모습으로
+                    달려요.
+                  </p>
+                </>
+              )}
             </div>
             <button className="guide-button" onClick={() => setHelp(true)}>
               <StudioIcon name="help" /> 처음이라면
             </button>
           </div>
-          <div className="studio-grid">
-            <div className="studio-workspace">
-              <div className="workspace-heading">
-                <h2>
-                  <span className="step-number">01</span> 선수 만들기
-                </h2>
-                <span className="local-save">
-                  <span className="tiny-dot" /> 이 기기에 자동 저장
-                </span>
-              </div>
-              <DrawingBoard
-                strokes={strokes}
-                onChange={setStrokes}
-                color={color}
-                onColor={setColor}
-                onLimit={setNotice}
-              />
-              <section className="athlete-strip" aria-label="그림 분석 결과">
-                <span className="analysis-label">
-                  <span className={`tiny-dot ${stats.valid ? "" : "muted"}`} />
-                  {stats.valid ? "선수 분석 완료" : "선수를 그려주세요"}
-                </span>
-                {stats.valid ? (
-                  <>
-                    <div className="stat">
-                      <span>다리 길이</span>
-                      <b>
-                        {stats.legLength > 0.46
-                          ? "롱다리"
-                          : stats.legLength > 0.3
-                            ? "적당해요"
-                            : "숏다리"}
-                      </b>
-                      <span className="mini-meter">
-                        <i style={{ width: `${stats.legLength * 100}%` }} />
-                      </span>
-                    </div>
-                    <div className="stat">
-                      <span>다리 간격</span>
-                      <b>
-                        {stats.legSpacing > 0.6
-                          ? "넓어요"
-                          : stats.legSpacing > 0.35
-                            ? "균형 잡힘"
-                            : "좁아요"}
-                      </b>
-                      <span className="mini-meter">
-                        <i style={{ width: `${stats.legSpacing * 100}%` }} />
-                      </span>
-                    </div>
-                    <div className="stat">
-                      <span>안정성</span>
-                      <b>
-                        {stats.stability}
-                        <small>/100</small>
-                      </b>
-                      <span className="mini-meter">
-                        <i style={{ width: `${stats.stability}%` }} />
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <span className="analysis-hint">
-                    {stats.reason || "몸통과 두 개 이상의 다리를 그려주세요."}
+          <div
+            className={`studio-grid ${mode === "friends" && !session ? "is-friends-entry" : ""}`}
+          >
+            {!(mode === "friends" && !session) && (
+              <div className="studio-workspace">
+                <div className="workspace-heading">
+                  <h2>
+                    <span className="step-number">01</span> 선수 만들기
+                  </h2>
+                  <span className="local-save">
+                    <span className="tiny-dot" /> 이 기기에 자동 저장
                   </span>
-                )}
-                <button
-                  className="info-circle"
-                  onClick={() => setHelp(true)}
-                  aria-label="형태 분석 도움말"
-                >
-                  ?
-                </button>
-              </section>
-
-              <div className="sample-picker">
-                <div className="sample-heading">
-                  <b>이 친구로 시작해도 좋아요</b>
-                  <span>선택한 뒤 자유롭게 고쳐보세요</span>
                 </div>
-                <div
-                  className="sample-options"
-                  role="group"
-                  aria-label="예시 선수 선택"
-                >
-                  {SAMPLE_ANIMALS.map((a) => (
-                    <button
-                      key={a.name}
-                      onClick={() => {
-                        setStrokes(a.strokes.map((s) => ({ ...s, color })));
-                        setName(a.name);
-                        setError("");
-                      }}
-                      aria-label={a.name + " 예시로 시작"}
-                    >
-                      <AnimalPreview animal={a} color={color} />
-                      <span>{a.name}</span>
-                      <StudioIcon name="arrow" />
-                    </button>
-                  ))}
+                <DrawingBoard
+                  strokes={strokes}
+                  onChange={setStrokes}
+                  color={color}
+                  onColor={setColor}
+                  onLimit={setNotice}
+                />
+                <section className="athlete-strip" aria-label="그림 분석 결과">
+                  <span className="analysis-label">
+                    <span
+                      className={`tiny-dot ${stats.valid ? "" : "muted"}`}
+                    />
+                    {stats.valid ? "선수 분석 완료" : "선수를 그려주세요"}
+                  </span>
+                  {stats.valid ? (
+                    <>
+                      <div className="stat">
+                        <span>다리 길이</span>
+                        <b>
+                          {stats.legLength > 0.46
+                            ? "롱다리"
+                            : stats.legLength > 0.3
+                              ? "적당해요"
+                              : "숏다리"}
+                        </b>
+                        <span className="mini-meter">
+                          <i style={{ width: `${stats.legLength * 100}%` }} />
+                        </span>
+                      </div>
+                      <div className="stat">
+                        <span>다리 간격</span>
+                        <b>
+                          {stats.legSpacing > 0.6
+                            ? "넓어요"
+                            : stats.legSpacing > 0.35
+                              ? "균형 잡힘"
+                              : "좁아요"}
+                        </b>
+                        <span className="mini-meter">
+                          <i style={{ width: `${stats.legSpacing * 100}%` }} />
+                        </span>
+                      </div>
+                      <div className="stat">
+                        <span>안정성</span>
+                        <b>
+                          {stats.stability}
+                          <small>/100</small>
+                        </b>
+                        <span className="mini-meter">
+                          <i style={{ width: `${stats.stability}%` }} />
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <span className="analysis-hint">
+                      {stats.reason || "몸통과 두 개 이상의 다리를 그려주세요."}
+                    </span>
+                  )}
+                  <button
+                    className="info-circle"
+                    onClick={() => setHelp(true)}
+                    aria-label="형태 분석 도움말"
+                  >
+                    ?
+                  </button>
+                </section>
+
+                <div className="sample-picker">
+                  <div className="sample-heading">
+                    <b>이 친구로 시작해도 좋아요</b>
+                    <span>선택한 뒤 자유롭게 고쳐보세요</span>
+                  </div>
+                  <div
+                    className="sample-options"
+                    role="group"
+                    aria-label="예시 선수 선택"
+                  >
+                    {SAMPLE_ANIMALS.map((a) => (
+                      <button
+                        key={a.name}
+                        onClick={() => {
+                          setStrokes(a.strokes.map((s) => ({ ...s, color })));
+                          setName(a.name);
+                          setError("");
+                        }}
+                        aria-label={a.name + " 예시로 시작"}
+                      >
+                        <AnimalPreview animal={a} color={color} />
+                        <span>{a.name}</span>
+                        <StudioIcon name="arrow" />
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
             <aside className="studio-sidebar" aria-label="경주 준비">
+              {mode === "friends" && !session && (
+                <div className="launch-card find-room-card">
+                  <div className="launch-heading">
+                    <span className="step-number">01</span>
+                    <h2>방 찾기</h2>
+                    <StudioIcon name="people" />
+                  </div>
+                  <div
+                    className="open-rooms-panel"
+                    aria-label="멀티플레이 방 목록"
+                  >
+                    <div className="open-rooms-header">
+                      <div>
+                        <b>멀티플레이 방 목록</b>
+                        <span>새로고침하면 친구가 만든 방이 보여요.</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="refresh-rooms-button"
+                        onClick={() => void loadOpenRooms()}
+                        disabled={loadingRooms || busy}
+                        aria-label="멀티플레이 방 목록 새로고침"
+                      >
+                        <StudioIcon name="refresh" />
+                        <span>{loadingRooms ? "갱신 중…" : "새로고침"}</span>
+                      </button>
+                    </div>
+                    {openRooms.length === 0 ? (
+                      <p className="open-rooms-empty">
+                        {loadingRooms
+                          ? "열린 방을 불러오고 있어요…"
+                          : "지금 열려 있는 멀티플레이 방이 없어요. 방을 만들거나 새로고침해 보세요!"}
+                      </p>
+                    ) : (
+                      <ul className="open-rooms-list">
+                        {openRooms.map((item) => (
+                          <li key={item.code} className="open-room-item">
+                            <div className="open-room-row">
+                              <div className="open-room-info">
+                                <div className="open-room-title-row">
+                                  <strong>{item.title}</strong>
+                                  <span
+                                    className={`room-visibility-badge ${item.isPrivate ? "is-private" : "is-public"}`}
+                                  >
+                                    {item.isPrivate ? (
+                                      <>
+                                        <StudioIcon name="lock" /> 비공개
+                                      </>
+                                    ) : (
+                                      "공개"
+                                    )}
+                                  </span>
+                                </div>
+                                <small>
+                                  방장 {item.hostName} ·{" "}
+                                  {getTrack(item.trackId).name} ·{" "}
+                                  <b>
+                                    {item.playerCount}/{item.capacity}명
+                                  </b>
+                                </small>
+                              </div>
+                              <button
+                                type="button"
+                                className="button outline open-room-join"
+                                disabled={busy}
+                                onClick={() => {
+                                  if (!item.isPrivate) {
+                                    void openRoom(true, item.code);
+                                    return;
+                                  }
+                                  if (selectedPrivateRoom === item.code) {
+                                    setSelectedPrivateRoom("");
+                                    setListPassword("");
+                                  } else {
+                                    setSelectedPrivateRoom(item.code);
+                                    setListPassword("");
+                                    setError("");
+                                  }
+                                }}
+                              >
+                                {item.isPrivate ? "비밀번호 입장" : "바로 입장"}
+                              </button>
+                            </div>
+                            {item.isPrivate &&
+                              selectedPrivateRoom === item.code && (
+                                <div className="open-room-password">
+                                  <input
+                                    type="password"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
+                                    maxLength={4}
+                                    value={listPassword}
+                                    onChange={(e) =>
+                                      setListPassword(
+                                        e.target.value
+                                          .replace(/\D/g, "")
+                                          .slice(0, 4),
+                                      )
+                                    }
+                                    placeholder="비밀번호 숫자 4자리"
+                                    aria-label={`${item.title} 비밀번호 4자리`}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="button dark"
+                                    disabled={busy || listPassword.length !== 4}
+                                    onClick={() =>
+                                      void openRoom(
+                                        true,
+                                        item.code,
+                                        listPassword,
+                                      )
+                                    }
+                                  >
+                                    입장하기
+                                  </button>
+                                </div>
+                              )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <form
+                    className="join-panel"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void openRoom(true);
+                    }}
+                  >
+                    <div>
+                      <b>초대 코드가 있나요?</b>
+                      <span>같은 코드로 함께 모여요.</span>
+                    </div>
+                    {(needJoinPassword || joinPassword.length > 0) && (
+                      <div className="join-password-row">
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={4}
+                          value={joinPassword}
+                          onChange={(e) =>
+                            setJoinPassword(
+                              e.target.value.replace(/\D/g, "").slice(0, 4),
+                            )
+                          }
+                          placeholder="비공개 방 비밀번호 숫자 4자리"
+                          aria-label="초대 코드 비공개 방 비밀번호 4자리"
+                        />
+                      </div>
+                    )}
+                    {!needJoinPassword && !joinPassword && (
+                      <button
+                        type="button"
+                        className="join-password-toggle"
+                        onClick={() => setNeedJoinPassword(true)}
+                      >
+                        <StudioIcon name="lock" /> 비공개 방 비밀번호 함께 입력
+                      </button>
+                    )}
+                    <div className="join-input">
+                      <input
+                        aria-label="6자리 방 코드"
+                        placeholder="방 코드 6자리"
+                        value={joinCode}
+                        maxLength={6}
+                        onChange={(e) =>
+                          setJoinCode(
+                            e.target.value
+                              .toUpperCase()
+                              .replace(/[^A-Z0-9]/g, ""),
+                          )
+                        }
+                      />
+                      <button
+                        className="button outline"
+                        disabled={busy || joinCode.length !== 6}
+                      >
+                        참가하기 ↗
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
               <div className="launch-card">
                 <div className="launch-heading">
                   <span className="step-number">02</span>
@@ -945,18 +1310,103 @@ export default function Home({
                   <StudioIcon name="flag" />
                 </div>
                 <section className="entry-controls">
-                  <label className="name-field">
-                    <span>
-                      선수 이름 <small>최대 20자</small>
-                    </span>
-                    <input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      maxLength={20}
-                      placeholder="러너의 이름을 지어주세요"
-                      aria-label="선수 이름"
+                  {mode === "friends" && !session ? (
+                    <label className="name-field">
+                      <span>
+                        방 이름 <small>최대 {ROOM_TITLE_MAX_LENGTH}자</small>
+                      </span>
+                      <input
+                        value={roomTitle}
+                        onChange={(e) =>
+                          setRoomTitle(
+                            e.target.value.slice(0, ROOM_TITLE_MAX_LENGTH),
+                          )
+                        }
+                        maxLength={ROOM_TITLE_MAX_LENGTH}
+                        placeholder="만들 방 이름을 입력해 주세요"
+                        aria-label="방 이름"
+                      />
+                    </label>
+                  ) : (
+                    <label className="name-field">
+                      <span>
+                        선수 이름 <small>최대 20자</small>
+                      </span>
+                      <input
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        maxLength={20}
+                        placeholder="러너의 이름을 지어주세요"
+                        aria-label="선수 이름"
+                      />
+                    </label>
+                  )}
+                  {mode === "friends" && !session && (
+                    <div className="room-create-options">
+                      <div className="room-privacy-field">
+                        <span className="field-caption">방 공개 설정</span>
+                        <div
+                          className="privacy-tabs"
+                          role="group"
+                          aria-label="방 공개 설정"
+                        >
+                          <button
+                            type="button"
+                            className={!isPrivate ? "active" : ""}
+                            aria-pressed={!isPrivate}
+                            onClick={() => {
+                              setIsPrivate(false);
+                              setError("");
+                            }}
+                            disabled={busy}
+                          >
+                            공개방 <small>누구나 입장</small>
+                          </button>
+                          <button
+                            type="button"
+                            className={isPrivate ? "active" : ""}
+                            aria-pressed={isPrivate}
+                            onClick={() => {
+                              setIsPrivate(true);
+                              setError("");
+                            }}
+                            disabled={busy}
+                          >
+                            <StudioIcon name="lock" /> 비공개방{" "}
+                            <small>비밀번호 4자리</small>
+                          </button>
+                        </div>
+                      </div>
+                      {isPrivate && (
+                        <label className="name-field">
+                          <span>
+                            비공개 방 비밀번호 <small>숫자 4자리</small>
+                          </span>
+                          <input
+                            type="password"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={4}
+                            value={roomPassword}
+                            onChange={(e) =>
+                              setRoomPassword(
+                                e.target.value.replace(/\D/g, "").slice(0, 4),
+                              )
+                            }
+                            placeholder="숫자 4자리 입력 (예: 1234)"
+                            aria-label="비공개 방 비밀번호 4자리"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
+                  {mode === "friends" && !session && (
+                    <RoomCapacity
+                      value={capacity}
+                      onChange={setCapacity}
+                      disabled={busy}
                     />
-                  </label>
+                  )}
                   <div className="race-mode">
                     <span className="field-caption">플레이 방식</span>
                     <div
@@ -988,7 +1438,9 @@ export default function Home({
                   </div>
                   <button
                     className="button dark start-button"
-                    disabled={busy || !stats.valid}
+                    disabled={
+                      busy || (mode === "friends" && !session ? false : !stats.valid)
+                    }
                     onClick={() =>
                       session
                         ? void roomAction({ action: "animal", animal })
@@ -1007,109 +1459,76 @@ export default function Home({
                     <StudioIcon name="arrow" />
                   </button>
                 </section>
-                {mode === "friends" && !session && (
-                  <RoomCapacity
-                    value={capacity}
-                    onChange={setCapacity}
-                    disabled={busy}
-                  />
-                )}
-                {mode === "friends" && !session && (
-                  <form
-                    className="join-panel"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void openRoom(true);
-                    }}
-                  >
+                {!(mode === "friends" && !session) && (
+                  <div className="selected-course">
+                    <StudioIcon name="flag" />
                     <div>
-                      <b>초대 코드가 있나요?</b>
-                      <span>같은 코드로 함께 모여요.</span>
+                      <span>선택한 트랙</span>
+                      <b>{getTrack(trackId).name}</b>
                     </div>
-                    <div className="join-input">
-                      <input
-                        aria-label="6자리 방 코드"
-                        placeholder="방 코드 6자리"
-                        value={joinCode}
-                        maxLength={6}
-                        onChange={(e) =>
-                          setJoinCode(
-                            e.target.value
-                              .toUpperCase()
-                              .replace(/[^A-Z0-9]/g, ""),
-                          )
-                        }
-                      />
-                      <button
-                        className="button outline"
-                        disabled={busy || joinCode.length !== 6 || !stats.valid}
-                      >
-                        참가하기 ↗
-                      </button>
-                    </div>
-                  </form>
-                )}
-
-                <div className="selected-course">
-                  <StudioIcon name="flag" />
-                  <div>
-                    <span>선택한 트랙</span>
-                    <b>{getTrack(trackId).name}</b>
+                    <a href="#courses" aria-label="아래에서 트랙 선택">
+                      변경 <span aria-hidden="true">↓</span>
+                    </a>
                   </div>
-                  <a href="#courses" aria-label="아래에서 트랙 선택">
-                    변경 <span aria-hidden="true">↓</span>
-                  </a>
-                </div>
+                )}
                 <p className="launch-note">
                   {offline
                     ? "혼자 연습은 인터넷 없이도 가능해요."
-                    : "가입 없이 플레이 · 그림은 기기에 저장"}
+                    : mode === "friends" && !session
+                      ? "방에 들어가서 선수 만들기와 트랙 고르기를 진행해요"
+                      : "가입 없이 플레이 · 그림은 기기에 저장"}
                 </p>
               </div>
-              <div className="coach-card">
-                {/* Shared with the offline WebView; no image optimization server is available there. */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={offline ? "./studio-buddy.png" : "/studio-buddy.png"}
-                  width="160"
-                  height="160"
-                  decoding="async"
-                  alt="민트 스카프를 두르고 달리는 파란 더비 친구"
-                />
-                <div>
-                  <span className="eyebrow">작은 팁</span>
-                  <h3>
-                    길쭉? 통통?
-                    <br />
-                    모두 환영이에요.
-                  </h3>
-                  <p>
-                    몸통과 떨어진 다리 두 개면
-                    <br />
-                    출발할 준비 완료!
-                  </p>
+              {!(mode === "friends" && !session) && (
+                <div className="coach-card">
+                  {/* Shared with the offline WebView; no image optimization server is available there. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={offline ? "./studio-buddy.png" : "/studio-buddy.png"}
+                    width="160"
+                    height="160"
+                    decoding="async"
+                    alt="민트 스카프를 두르고 달리는 파란 더비 친구"
+                  />
+                  <div>
+                    <span className="eyebrow">작은 팁</span>
+                    <h3>
+                      길쭉? 통통?
+                      <br />
+                      모두 환영이에요.
+                    </h3>
+                    <p>
+                      몸통과 떨어진 다리 두 개면
+                      <br />
+                      출발할 준비 완료!
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
             </aside>
           </div>
-          <div id="courses" className="courses-section">
-            <TrackPicker
-              selected={trackId}
-              onSelect={setTrackId}
-              stats={stats}
-              disabled={!!session}
-            />
-          </div>
-          <div className="studio-tip">
-            <StudioIcon name="spark" />
-            <p>
-              <b>모양을 바꾸면, 경주도 달라져요.</b> 긴 다리는 허들에, 낮은
-              몸통은 터널에 유리해요.
-            </p>
-            <button onClick={() => setHelp(true)}>
-              플레이 가이드 <StudioIcon name="arrow" />
-            </button>
-          </div>
+          {!(mode === "friends" && !session) && (
+            <>
+              <div id="courses" className="courses-section">
+                <TrackPicker
+                  selected={trackId}
+                  onSelect={setTrackId}
+                  stats={stats}
+                  disabled={!!session}
+                />
+              </div>
+              <div className="studio-tip">
+                <StudioIcon name="spark" />
+                <p>
+                  <b>모양을 바꾸면, 경주도 달라져요.</b> 긴 다리는 허들에, 낮은
+                  몸통은 터널에 유리해요.
+                </p>
+                <button onClick={() => setHelp(true)}>
+                  플레이 가이드 <StudioIcon name="arrow" />
+                </button>
+              </div>
+            </>
+          )}
         </section>
       )}
       {stage === "lobby" && (
@@ -1126,8 +1545,34 @@ export default function Home({
           </div>
           <div className="lobby-title">
             <div>
-              <h1>우리의 출발선</h1>
+              <div className="lobby-heading-badges">
+                <span
+                  className={`room-visibility-badge ${room?.isPrivate ? "is-private" : "is-public"}`}
+                >
+                  {room?.isPrivate ? (
+                    <>
+                      <StudioIcon name="lock" /> 비공개방
+                    </>
+                  ) : (
+                    "공개방"
+                  )}
+                </span>
+              </div>
+              <h1>{room?.title || "우리의 출발선"}</h1>
               <p>각자의 낙서로, 하나의 출발선에. 모두 준비되면 출발합니다.</p>
+            </div>
+            <div className="lobby-invite">
+              {room && (
+                <button
+                  type="button"
+                  className="kakao-share-button"
+                  onClick={() => void shareKakao()}
+                  aria-label={`방 코드 ${room.code}, 카카오톡으로 보내기`}
+                >
+                  <StudioIcon name="kakao" />
+                  <span>카카오톡으로 보내기</span>
+                </button>
+              )}
             </div>
             {room && (
               <button
@@ -1141,10 +1586,135 @@ export default function Home({
               </button>
             )}
           </div>
+          <div className="studio-workspace lobby-studio">
+            <div className="workspace-heading">
+              <h2>
+                <span className="step-number">01</span> 선수 만들기
+              </h2>
+              <span className="local-save">
+                <span className="tiny-dot" /> 그린 선수는 방에 바로 적용할 수
+                있어요
+              </span>
+            </div>
+            <div className="lobby-athlete-bar">
+              <label className="name-field">
+                <span>
+                  선수 이름 <small>최대 20자</small>
+                </span>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={20}
+                  placeholder="러너의 이름을 지어주세요"
+                  aria-label="선수 이름"
+                />
+              </label>
+              <button
+                type="button"
+                className="button dark lobby-save-athlete"
+                disabled={busy || !stats.valid || !!me?.ready}
+                onClick={() => void saveLobbyAnimal()}
+              >
+                {busy ? "적용 중…" : "내 선수 방에 적용하기"}
+                <StudioIcon name="check" />
+              </button>
+            </div>
+            <DrawingBoard
+              strokes={strokes}
+              onChange={setStrokes}
+              color={color}
+              onColor={setColor}
+              onLimit={setNotice}
+            />
+            <section className="athlete-strip" aria-label="그림 분석 결과">
+              <span className="analysis-label">
+                <span className={`tiny-dot ${stats.valid ? "" : "muted"}`} />
+                {stats.valid ? "선수 분석 완료" : "선수를 그려주세요"}
+              </span>
+              {stats.valid ? (
+                <>
+                  <div className="stat">
+                    <span>다리 길이</span>
+                    <b>
+                      {stats.legLength > 0.46
+                        ? "롱다리"
+                        : stats.legLength > 0.3
+                          ? "적당해요"
+                          : "숏다리"}
+                    </b>
+                    <span className="mini-meter">
+                      <i style={{ width: `${stats.legLength * 100}%` }} />
+                    </span>
+                  </div>
+                  <div className="stat">
+                    <span>다리 간격</span>
+                    <b>
+                      {stats.legSpacing > 0.6
+                        ? "넓어요"
+                        : stats.legSpacing > 0.35
+                          ? "균형 잡힘"
+                          : "좁아요"}
+                    </b>
+                    <span className="mini-meter">
+                      <i style={{ width: `${stats.legSpacing * 100}%` }} />
+                    </span>
+                  </div>
+                  <div className="stat">
+                    <span>안정성</span>
+                    <b>
+                      {stats.stability}
+                      <small>/100</small>
+                    </b>
+                    <span className="mini-meter">
+                      <i style={{ width: `${stats.stability}%` }} />
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <span className="analysis-hint">
+                  {stats.reason || "몸통과 두 개 이상의 다리를 그려주세요."}
+                </span>
+              )}
+              <button
+                className="info-circle"
+                onClick={() => setHelp(true)}
+                aria-label="형태 분석 도움말"
+              >
+                ?
+              </button>
+            </section>
+            <div className="sample-picker">
+              <div className="sample-heading">
+                <b>이 친구로 시작해도 좋아요</b>
+                <span>선택한 뒤 자유롭게 고쳐보세요</span>
+              </div>
+              <div
+                className="sample-options"
+                role="group"
+                aria-label="예시 선수 선택"
+              >
+                {SAMPLE_ANIMALS.map((a) => (
+                  <button
+                    key={a.name}
+                    onClick={() => {
+                      setStrokes(a.strokes.map((s) => ({ ...s, color })));
+                      setName(a.name);
+                      setError("");
+                    }}
+                    aria-label={a.name + " 예시로 시작"}
+                  >
+                    <AnimalPreview animal={a} color={color} />
+                    <span>{a.name}</span>
+                    <StudioIcon name="arrow" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
           <TrackPicker
             selected={room?.trackId ?? trackId}
             onSelect={(id) => void roomAction({ action: "track", trackId: id })}
-            stats={analyzeAnimal(me?.animal?.strokes ?? strokes)}
+            stats={stats}
             disabled={busy || !isHost}
             lobby
           />
@@ -1230,23 +1800,15 @@ export default function Home({
             <div className="lobby-buttons">
               <button
                 className="button outline"
-                disabled={busy || !me || me.ready}
-                onClick={() => {
-                  if (me?.animal) {
-                    setStrokes(me.animal.strokes);
-                    setName(me.name);
-                  }
-                  setStage("draw");
-                }}
+                disabled={busy || !me || me.ready || !stats.valid}
+                onClick={() => void saveLobbyAnimal()}
               >
-                내 선수 다시 그리기
+                내 선수 방에 적용하기
               </button>
               <button
                 className={`button ${me?.ready ? "outline" : "dark"}`}
-                disabled={busy || !me?.animal}
-                onClick={() =>
-                  void roomAction({ action: "ready", ready: !me?.ready })
-                }
+                disabled={busy || !me?.animal || (!me?.ready && !stats.valid)}
+                onClick={() => void toggleLobbyReady()}
               >
                 {me?.ready ? "준비 취소" : "준비됐어요 ✓"}
               </button>
