@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
+import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -15,6 +16,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -51,10 +53,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 
 public class MainActivity extends Activity {
     static final String OFFLINE_ORIGIN = "https://appassets.androidplatform.net";
     static final String OFFLINE_URL = OFFLINE_ORIGIN + "/assets/game/index.html";
+    static final String DEVELOPER_PIN = "9049";
     private static final int SURFACE = Color.WHITE;
     private static final int INK = Color.rgb(24, 43, 38);
     private static final int GREEN = Color.rgb(20, 125, 84);
@@ -75,12 +79,14 @@ public class MainActivity extends Activity {
     private boolean raceScreen, screenBridgeInstalled;
     private int previousOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
     private Runnable loadTimeout;
+    private int devTapCount;
+    private long lastDevTapMs;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         preferences = getSharedPreferences("draw-derby", MODE_PRIVATE);
         // Set the published server for fresh installs and upgrades from the LAN-only APK.
-        // Later user-selected addresses remain saved across launches.
+        // Later developer-selected addresses remain saved across launches.
         if (!preferences.getBoolean("published-server-configured", false)) {
             preferences.edit().putString("server", ServerAddress.DEFAULT_ORIGIN)
                     .putBoolean("published-server-configured", true).apply();
@@ -142,8 +148,11 @@ public class MainActivity extends Activity {
             if (online) switchPage(OFFLINE_URL, false);
         });
         friendsButton = button("친구와 경주", this::openMultiplayer);
-        Button settingsButton = button("연결 설정", this::showConnectionDialog);
-        for (Button item : new Button[]{soloButton, friendsButton, settingsButton}) {
+        friendsButton.setOnLongClickListener(v -> {
+            showDeveloperPinDialog();
+            return true;
+        });
+        for (Button item : new Button[]{soloButton, friendsButton}) {
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1);
             params.setMargins(dp(3), 0, dp(3), 0);
             item.setBackground(background(0xfff0f7f3));
@@ -161,6 +170,7 @@ public class MainActivity extends Activity {
         title.setTextColor(INK);
         title.setTextSize(24);
         title.setTypeface(appTypeface, Typeface.BOLD);
+        title.setOnClickListener(v -> registerDeveloperTap());
         errorPanel.addView(title);
         errorText = new TextView(this);
         errorText.setTextSize(15);
@@ -171,7 +181,6 @@ public class MainActivity extends Activity {
         errorPanel.addView(errorText);
         errorPanel.addView(button("다시 연결", () -> loadPage(currentUrl, online)));
         errorPanel.addView(button("인터넷 없이 혼자 연습", () -> loadPage(OFFLINE_URL, false)));
-        errorPanel.addView(button("게임 서버 주소 확인", this::showConnectionDialog));
         errorPanel.setVisibility(View.GONE);
         content.addView(errorPanel, new FrameLayout.LayoutParams(-1, -1));
         setContentView(root);
@@ -207,6 +216,7 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(true);
         settings.setTextZoom(100);
         settings.setSupportMultipleWindows(false);
+        settings.setUserAgentString(settings.getUserAgentString() + " DrawDerbyApp/" + BuildConfig.VERSION_NAME);
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         configureScreenBridge();
         webView.setWebViewClient(new GameClient());
@@ -277,8 +287,8 @@ public class MainActivity extends Activity {
 
     private void openMultiplayer() {
         if (online) return;
-        if (serverOrigin.isEmpty()) showConnectionDialog();
-        else switchPage(serverOrigin + "/?mode=friends", true);
+        if (serverOrigin.isEmpty()) serverOrigin = ServerAddress.DEFAULT_ORIGIN;
+        switchPage(serverOrigin + "/?mode=friends", true);
     }
 
     private void configureScreenBridge() {
@@ -290,6 +300,7 @@ public class MainActivity extends Activity {
                     if (!isMainFrame || !isGameUrl(sourceOrigin.toString()) || !isGameUrl(view.getUrl())) return;
                     String mode = message.getData();
                     if ("race".equals(mode) || "normal".equals(mode)) setRaceScreen("race".equals(mode));
+                    else if ("dev-settings".equals(mode)) showDeveloperPinDialog();
                     else if (mode != null && mode.startsWith("kakao:")) shareToKakao(mode.substring(6), view.getUrl());
                 });
         screenBridgeInstalled = true;
@@ -303,6 +314,21 @@ public class MainActivity extends Activity {
                   if(!root){if(++attempts<200)setTimeout(attach,50);return}
                   if(window.derbyScreenObserver)window.derbyScreenObserver.disconnect();
                   let previous;
+                  const wordmark=document.querySelector('.wordmark');
+                  if(wordmark&&!wordmark.dataset.devBound){
+                    wordmark.dataset.devBound='true';
+                    let taps=0,lastTap=0;
+                    wordmark.addEventListener('click',()=>{
+                      const now=Date.now();
+                      if(now-lastTap>2500)taps=0;
+                      lastTap=now;
+                      if(++taps>=5){
+                        taps=0;
+                        if(window.DrawDerbyScreen)window.DrawDerbyScreen.postMessage('dev-settings');
+                        else location.href='drawderby://dev-settings';
+                      }
+                    });
+                  }
                   function ensureKakaoButton(){
                     const roomCode=document.querySelector('.lobby-title .room-code');
                     if(!roomCode||document.querySelector('.kakao-share-button'))return;
@@ -333,6 +359,38 @@ public class MainActivity extends Activity {
                 """, null);
     }
 
+    private Intent createKakaoShareIntent(String text) {
+        Intent base = new Intent(Intent.ACTION_SEND);
+        base.setType("text/plain");
+        base.setPackage("com.kakao.talk");
+        base.putExtra(Intent.EXTRA_TEXT, text);
+        base.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        List<ResolveInfo> resolved = getPackageManager().queryIntentActivities(base, 0);
+        for (ResolveInfo info : resolved) {
+            if (info.activityInfo != null && "com.kakao.talk".equals(info.activityInfo.packageName)) {
+                String className = info.activityInfo.name == null ? "" : info.activityInfo.name;
+                // Target KakaoTalk's friend/chatroom picker directly instead of "Send to Myself" (memo).
+                if (className.contains("SplashConnectActivity")) {
+                    Intent targeted = new Intent(base);
+                    targeted.setClassName(info.activityInfo.packageName, className);
+                    return targeted;
+                }
+            }
+        }
+        for (ResolveInfo info : resolved) {
+            if (info.activityInfo != null && "com.kakao.talk".equals(info.activityInfo.packageName)) {
+                String className = info.activityInfo.name == null ? "" : info.activityInfo.name;
+                String lower = className.toLowerCase(java.util.Locale.ROOT);
+                if (!lower.contains("memo") && !lower.contains("keep")) {
+                    Intent targeted = new Intent(base);
+                    targeted.setClassName(info.activityInfo.packageName, className);
+                    return targeted;
+                }
+            }
+        }
+        return base;
+    }
+
     private void shareToKakao(String rawCode, String pageUrl) {
         String code = rawCode == null ? "" : rawCode.trim().toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z0-9]", "");
         if (code.length() != 6) return;
@@ -341,16 +399,21 @@ public class MainActivity extends Activity {
         String text = "[드로우 더비] 내가 그린 동물로 함께 달려요!\n초대 코드: " + code + "\n바로 참가하기: " + inviteUrl;
         android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         if (clipboard != null) {
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("드로우 더비 초대 코드", text));
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("드로우 더비 초대 링크", text));
         }
-        Intent kakao = new Intent(Intent.ACTION_SEND);
-        kakao.setType("text/plain");
-        kakao.setPackage("com.kakao.talk");
-        kakao.putExtra(Intent.EXTRA_TEXT, text);
         try {
-            startActivity(kakao);
-        } catch (ActivityNotFoundException ignored) {
-            Toast.makeText(this, "카카오톡이 설치되어 있지 않아 초대 메시지를 복사했어요.", Toast.LENGTH_SHORT).show();
+            startActivity(createKakaoShareIntent(text));
+        } catch (ActivityNotFoundException | SecurityException firstError) {
+            Intent fallback = new Intent(Intent.ACTION_SEND);
+            fallback.setType("text/plain");
+            fallback.setPackage("com.kakao.talk");
+            fallback.putExtra(Intent.EXTRA_TEXT, text);
+            fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                startActivity(fallback);
+            } catch (ActivityNotFoundException ignored) {
+                Toast.makeText(this, "카카오톡이 설치되어 있지 않아 초대 링크를 복사했어요.", Toast.LENGTH_SHORT).show();
+            }
         }
     }
 
@@ -378,6 +441,49 @@ public class MainActivity extends Activity {
         getWindow().getDecorView().requestApplyInsets();
     }
 
+    private void registerDeveloperTap() {
+        long now = SystemClock.uptimeMillis();
+        if (now - lastDevTapMs > 2500) devTapCount = 0;
+        lastDevTapMs = now;
+        if (++devTapCount >= 5) {
+            devTapCount = 0;
+            showDeveloperPinDialog();
+        }
+    }
+
+    private void showDeveloperPinDialog() {
+        LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(dp(24), dp(10), dp(24), 0);
+        TextView note = new TextView(this);
+        note.setTypeface(appTypeface);
+        note.setText("서버 연결 설정은 개발자 전용 기능입니다.\n개발자 비밀번호(PIN)를 입력해 주세요.");
+        note.setTextColor(INK);
+        note.setPadding(0, 0, 0, dp(16));
+        fields.addView(note);
+        EditText pinInput = new EditText(this);
+        pinInput.setTypeface(appTypeface);
+        pinInput.setSingleLine(true);
+        pinInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pinInput.setHint("개발자 PIN 4자리");
+        pinInput.setContentDescription("개발자 비밀번호");
+        fields.addView(pinInput);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("개발자 인증 · 연결 설정")
+                .setView(fields).setNegativeButton("취소", null)
+                .setPositiveButton("확인", null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String expectedPin = preferences.getString("developer-pin", DEVELOPER_PIN);
+            String entered = pinInput.getText() == null ? "" : pinInput.getText().toString().trim();
+            if (expectedPin.equals(entered)) {
+                dialog.dismiss();
+                showConnectionDialog();
+            } else {
+                pinInput.setError("비밀번호가 올바르지 않아요.");
+            }
+        }));
+        dialog.show();
+    }
+
     private void showConnectionDialog() {
         LinearLayout fields = new LinearLayout(this);
         fields.setOrientation(LinearLayout.VERTICAL);
@@ -402,7 +508,7 @@ public class MainActivity extends Activity {
         hint.setTextSize(12);
         hint.setPadding(0, dp(12), 0, dp(4));
         fields.addView(hint);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("친구와 경주 · 서버 연결")
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("개발자 설정 · 서버 연결")
                 .setView(fields).setNegativeButton("취소", null).setNeutralButton("기본 서버", null)
                 .setPositiveButton("연결하기", null).create();
         dialog.setOnShowListener(ignored -> {
@@ -484,6 +590,10 @@ public class MainActivity extends Activity {
                 openMultiplayer();
                 return true;
             }
+            if (request.isForMainFrame() && isGameUrl(view.getUrl()) && url.equals("drawderby://dev-settings")) {
+                showDeveloperPinDialog();
+                return true;
+            }
             if (request.isForMainFrame() && isGameUrl(view.getUrl())
                     && "drawderby".equals(request.getUrl().getScheme())
                     && "kakao".equals(request.getUrl().getHost())) {
@@ -509,12 +619,12 @@ public class MainActivity extends Activity {
 
         @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceErrorCompat error) {
             if (request.isForMainFrame()) showError(online
-                    ? "게임 서버에 연결하지 못했어요. 서버 주소와 인터넷 연결을 확인해 주세요. 혼자 연습은 인터넷 없이도 할 수 있어요."
+                    ? "게임 서버에 연결하지 못했어요. 인터넷 연결을 확인하고 잠시 후 다시 연결해 주세요. 혼자 연습은 인터넷 없이도 할 수 있어요."
                     : "게임을 불러오지 못했어요. 다시 실행하거나 Android System WebView를 업데이트해 주세요.");
         }
 
         @Override public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
-            if (request.isForMainFrame()) showError("게임 서버가 응답하지 않아요. 서버 주소를 확인하거나 잠시 후 다시 연결해 주세요.");
+            if (request.isForMainFrame()) showError("게임 서버가 응답하지 않아요. 잠시 후 다시 연결해 주세요.");
         }
 
         @Override public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {

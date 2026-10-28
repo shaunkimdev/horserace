@@ -346,7 +346,8 @@ export default function Home({
       landing: number;
     }>({ race: null, time: -1, landing: 0 }),
     lastTick = useRef(-99),
-    roomRevision = useRef({ code: "", revision: 0 });
+    roomRevision = useRef({ code: "", revision: 0 }),
+    pendingInviteRoom = useRef("");
   const [draftLoaded, setDraftLoaded] = useState(false);
   const stats = useMemo(() => analyzeAnimal(strokes), [strokes]);
   const animal: Animal = useMemo(
@@ -422,10 +423,13 @@ export default function Home({
   useEffect(() => {
     const timer = setTimeout(() => {
       const params = new URLSearchParams(window.location.search);
-      const code = offline ? null : params.get("room");
+      const rawCode = offline ? null : params.get("room");
+      const code = rawCode
+        ? rawCode.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6)
+        : "";
       if (!offline && params.get("mode") === "friends") setMode("friends");
       if (code) {
-        setJoinCode(code.toUpperCase().slice(0, 6));
+        setJoinCode(code);
         setMode("friends");
       }
       try {
@@ -450,13 +454,15 @@ export default function Home({
           stored?.code &&
           stored?.token &&
           stored?.playerId &&
-          (!code || code.toUpperCase() === stored.code)
+          (!code || code === stored.code)
         ) {
           setSession(stored);
           setStage("lobby");
+        } else if (!offline && code.length === 6) {
+          pendingInviteRoom.current = code;
         }
       } catch {
-        /* Private browsing can disable storage. */
+        if (!offline && code.length === 6) pendingInviteRoom.current = code;
       }
       setDraftLoaded(true);
     }, 0);
@@ -705,7 +711,7 @@ export default function Home({
       });
       const data = (await response.json()) as RoomSession & { error?: string };
       if (!response.ok) {
-        if (join && response.status === 403 && !codeOverride)
+        if (join && response.status === 403 && (!codeOverride || !selectedPrivateRoom))
           setNeedJoinPassword(true);
         throw new Error(data.error || "방을 열지 못했어요.");
       }
@@ -812,6 +818,12 @@ export default function Home({
     lastTick.current = -99;
     setStage("race");
   }
+  useEffect(() => {
+    if (!draftLoaded || offline || session || !pendingInviteRoom.current) return;
+    const inviteCode = pendingInviteRoom.current;
+    pendingInviteRoom.current = "";
+    void openRoom(true, inviteCode);
+  });
   async function shareRoom() {
     if (!room) return;
     try {
@@ -826,28 +838,46 @@ export default function Home({
   async function shareKakao() {
     if (!room) return;
     const url = `${window.location.origin}/?room=${room.code}`;
-    const text = `[드로우 더비] 내가 그린 동물로 함께 달려요!\n초대 코드: ${room.code}\n바로 참가하기: ${url}`;
-    const bridge = (
-      window as Window & {
-        DrawDerbyScreen?: { postMessage: (msg: string) => void };
-      }
-    ).DrawDerbyScreen;
-    if (bridge) {
-      try {
-        await navigator.clipboard?.writeText(text);
-      } catch {
-        /* Clipboard is optional when launching the native intent. */
-      }
-      bridge.postMessage(`kakao:${room.code}`);
-      setNotice("카카오톡 공유 창을 열었어요.");
+    const roomLine = room.title ? `방 이름: ${room.title}\n` : "";
+    const shareDescription = `[드로우 더비] 내가 그린 동물로 함께 달려요!\n${roomLine}초대 코드: ${room.code}\n바로 참가하기:`;
+    const text = `${shareDescription} ${url}`;
+    const win = window as Window & {
+      DrawDerbyScreen?: { postMessage: (msg: string) => void };
+      derbyNativeKakao?: boolean;
+    };
+    const isAndroidApp =
+      Boolean(win.derbyNativeKakao) ||
+      /DrawDerbyApp\//i.test(navigator.userAgent);
+    if (win.DrawDerbyScreen && isAndroidApp) {
+      win.DrawDerbyScreen.postMessage(`kakao:${room.code}`);
+      void navigator.clipboard?.writeText(text).catch(() => {});
+      setNotice("카카오톡에서 공유할 대화방을 선택해 주세요.");
       return;
     }
-    if ((window as Window & { derbyNativeKakao?: boolean }).derbyNativeKakao) {
+    if (isAndroidApp) {
       window.location.assign(
         `drawderby://kakao?code=${encodeURIComponent(room.code)}`,
       );
-      setNotice("카카오톡 공유 창을 열었어요.");
+      void navigator.clipboard?.writeText(text).catch(() => {});
+      setNotice("카카오톡에서 공유할 대화방을 선택해 주세요.");
       return;
+    }
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({
+          title: "드로우 더비 · 친구와 경주",
+          text: shareDescription,
+          url,
+        });
+        void navigator.clipboard?.writeText(text).catch(() => {});
+        setNotice("카카오톡 대화방으로 초대 링크를 공유해 보세요!");
+        return;
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") {
+          void navigator.clipboard?.writeText(text).catch(() => {});
+          return;
+        }
+      }
     }
     let copied = false;
     try {
@@ -856,29 +886,10 @@ export default function Home({
     } catch {
       /* Clipboard may be restricted in some browsers. */
     }
-    if (typeof navigator.share === "function") {
-      try {
-        await navigator.share({
-          title: "드로우 더비 · 친구와 경주",
-          text: `[드로우 더비] 내가 그린 동물로 함께 달려요!\n초대 코드: ${room.code}`,
-          url,
-        });
-        setNotice("카카오톡으로 초대 코드를 공유해 보세요!");
-        return;
-      } catch (e) {
-        if (e instanceof Error && e.name === "AbortError") {
-          if (copied)
-            setNotice(
-              "카카오톡 초대 메시지를 복사했어요. 대화방에 붙여넣어 보내주세요!",
-            );
-          return;
-        }
-      }
-    }
     setNotice(
       copied
-        ? "카카오톡 초대 메시지를 복사했어요. 대화방에 붙여넣어 보내주세요!"
-        : `방 코드 ${room.code}를 카카오톡으로 친구에게 알려주세요.`,
+        ? "카카오톡 초대 링크를 복사했어요. 대화방에 붙여넣어 보내주세요!"
+        : `방 코드 ${room.code}와 초대 링크(${url})를 카카오톡으로 친구에게 알려주세요.`,
     );
   }
   const frame = race ? sampleRace(race, Math.max(0, elapsed)) : null,
