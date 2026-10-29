@@ -396,10 +396,10 @@ public class MainActivity extends Activity {
         if (code.length() != 6) return;
         String origin = ServerAddress.sameOrigin(pageUrl, serverOrigin) ? serverOrigin : ServerAddress.DEFAULT_ORIGIN;
         String inviteUrl = origin + "/?room=" + code;
-        String text = "[드로우 더비] 내가 그린 동물로 함께 달려요!\n초대 코드: " + code + "\n바로 참가하기: " + inviteUrl;
+        String text = "[스케치북 레이스] 내가 그린 동물로 함께 달려요!\n초대 코드: " + code + "\n바로 참가하기: " + inviteUrl;
         android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         if (clipboard != null) {
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("드로우 더비 초대 링크", text));
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("스케치북 레이스 초대 링크", text));
         }
         try {
             startActivity(createKakaoShareIntent(text));

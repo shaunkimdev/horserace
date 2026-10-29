@@ -839,7 +839,7 @@ export default function Home({
     if (!room) return;
     const url = `${window.location.origin}/?room=${room.code}`;
     const roomLine = room.title ? `방 이름: ${room.title}\n` : "";
-    const shareDescription = `[드로우 더비] 내가 그린 동물로 함께 달려요!\n${roomLine}초대 코드: ${room.code}\n바로 참가하기:`;
+    const shareDescription = `[스케치북 레이스] 내가 그린 동물로 함께 달려요!\n${roomLine}초대 코드: ${room.code}\n바로 참가하기:`;
     const text = `${shareDescription} ${url}`;
     const win = window as Window & {
       DrawDerbyScreen?: { postMessage: (msg: string) => void };
@@ -865,7 +865,7 @@ export default function Home({
     if (typeof navigator.share === "function") {
       try {
         await navigator.share({
-          title: "드로우 더비 · 친구와 경주",
+          title: "스케치북 레이스 · 친구와 경주",
           text: shareDescription,
           url,
         });
@@ -911,13 +911,13 @@ export default function Home({
             if (room) setStage(room.race ? "race" : "lobby");
             else setStage("draw");
           }}
-          aria-label="Draw Derby 홈"
+          aria-label="스케치북 레이스 홈"
         >
           <span className="brand-mark">
             <StudioIcon name="pencil" />
           </span>
           <span>
-            draw derby<span className="brand-caption">드로우 더비</span>
+            sketchbook race<span className="brand-caption">스케치북 레이스</span>
           </span>
         </button>
         <ol className="journey" aria-label="플레이 진행 단계">
@@ -1499,7 +1499,7 @@ export default function Home({
                     width="160"
                     height="160"
                     decoding="async"
-                    alt="민트 스카프를 두르고 달리는 파란 더비 친구"
+                    alt="민트 스카프를 두르고 달리는 파란 레이스 친구"
                   />
                   <div>
                     <span className="eyebrow">작은 팁</span>
@@ -2039,7 +2039,7 @@ export default function Home({
       )}
       <footer className="site-footer">
         <span className="footer-brand">
-          draw derby <span>나만의 낙서 운동장</span>
+          sketchbook race <span>나만의 낙서 운동장</span>
         </span>
         <button onClick={() => setHelp(true)}>플레이 가이드</button>
         <button onClick={() => setProductInfo("data")}>저장·공유 안내</button>

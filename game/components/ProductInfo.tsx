@@ -25,7 +25,7 @@ export default function ProductInfo({
       <button className="dialog-close" onClick={close} aria-label="안내 닫기">
         ×
       </button>
-      <span className="eyebrow">드로우 더비</span>
+      <span className="eyebrow">스케치북 레이스</span>
       <h2 id="product-info-title">{title}</h2>
       {kind === "data" ? (
         <>
